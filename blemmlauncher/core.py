@@ -413,11 +413,34 @@ def subst(s, subs):
     return s
 
 def resolve_arglist(items, subs):
+    """Resolve Minecraft argument objects while respecting OS-specific rules.
+
+    Some Forge/Minecraft version JSON files contain macOS-only JVM flags such
+    as -XstartOnFirstThread.  Never pass that flag on Windows or Linux.
+    """
     out = []
     for a in items:
-        if isinstance(a, str): out.append(subst(a, subs))
-        elif is_allowed(a.get("rules")):
-            v = a["value"]; out.extend(subst(x, subs) for x in (v if isinstance(v, list) else [v]))
+        if isinstance(a, str):
+            values = [a]
+            rules = None
+        else:
+            rules = a.get("rules")
+            if not is_allowed(rules):
+                continue
+            v = a["value"]
+            values = v if isinstance(v, list) else [v]
+
+        for value in values:
+            value = subst(value, subs)
+
+            # This is a macOS-only JVM option.  Passing it to the Windows
+            # JVM causes an immediate startup failure:
+            # "Unrecognized option: -XstartOnFirstThread"
+            if value == "-XstartOnFirstThread" and platform.system() != "Darwin":
+                continue
+
+            out.append(value)
+
     return out
 
 def launch(version_id, username="Blemm", ram="2G", optifine=None):
