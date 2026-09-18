@@ -273,4 +273,57 @@ def enable_resourcepack(filename):
     open(opts_path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
 
 # ---------- launch ----------
-d
+def subst(s, subs):
+    for k, v in subs.items(): s = s.replace(k, v)
+    return s
+
+def resolve_arglist(items, subs):
+    out = []
+    for a in items:
+        if isinstance(a, str): out.append(subst(a, subs))
+        elif is_allowed(a.get("rules")):
+            v = a["value"]; out.extend(subst(x, subs) for x in (v if isinstance(v, list) else [v]))
+    return out
+
+def launch(version_id, username="Blemm", ram="2G", optifine=None):
+    m = manifest()
+    vid = resolve_version(version_id, m)
+    vj = load_version_json(vid, m)
+    java = java_bin_for(vid, vj.get("_java_major"))
+    vanilla_jar = os.path.join(GAME_DIR, "versions", vj["_vanilla_id"], vj["_vanilla_id"] + ".jar")
+    classpath, natives_dir = install_libraries(vj)
+    classpath.insert(0, vanilla_jar)
+    asset_id = install_assets(vj)
+    game_args = vj.get("arguments", {}).get("game") or vj["minecraftArguments"].split()
+    jvm_args = vj.get("arguments", {}).get("jvm") or \
+        ["-Djava.library.path=${natives_directory}",
+         "-Dminecraft.launcher.brand=${launcher_name}",
+         "-Dminecraft.launcher.version=${launcher_version}", "-cp", "${classpath}"]
+    subs = {
+        "${auth_player_name}": username,
+        "${auth_uuid}": str(uuid.uuid3(uuid.NAMESPACE_OID, "offline:" + username)),
+        "${auth_access_token}": "0", "${auth_session}": "0",
+        "${user_type}": "legacy", "${user_properties}": "{}",
+        "${version_name}": vid, "${version_type}": LAUNCHER_NAME,
+        "${game_directory}": os.path.abspath(GAME_DIR),
+        "${assets_root}": os.path.abspath(ASSETS), "${assets_index_name}": asset_id,
+        "${game_assets}": os.path.join(ASSETS, "virtual", asset_id),
+        "${natives_directory}": os.path.abspath(natives_dir),
+        "${launcher_name}": LAUNCHER_NAME, "${launcher_version}": LAUNCHER_VERSION,
+        "${classpath}": os.pathsep.join(classpath), "${classpath_separator}": os.pathsep,
+        "${library_directory}": os.path.abspath(LIBS),
+        "${primary_jar}": os.path.abspath(vanilla_jar),
+        "${clientid}": "0" * 32, "${auth_xuid}": "0",
+    }
+    cmd = [java, "-Xms512M", f"-Xmx{ram}"]
+    log_cfg = vj.get("logging", {}).get("client", {})
+    if log_cfg:
+        lf = os.path.join(GAME_DIR, "log-configs", log_cfg["file"]["id"])
+        download(log_cfg["file"]["url"], lf, log_cfg["file"].get("sha1"))
+        cmd.append(f"-Dlog4j.configurationFile={os.path.abspath(lf)}")
+    cmd += resolve_arglist(jvm_args, subs) + [vj["mainClass"]] + resolve_arglist(game_args, subs)
+    os.makedirs(GAME_DIR, exist_ok=True)
+    log(f"Launching {vid} as {username} (Java {vj.get('_java_major') or '?'})...")
+    report("Starting Minecraft...", 99, 100)
+    subprocess.run(cmd, cwd=GAME_DIR)
+    report("Minecraft closed.", 100, 100)
