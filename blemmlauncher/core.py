@@ -1,0 +1,334 @@
+"""BlemmLauncher core - versions, Forge, OptiFine, mods, packs, Java."""
+import hashlib, json, os, platform, shutil, subprocess, sys, tempfile, urllib.request, uuid, zipfile
+
+LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.0"
+MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+LIB_BASE = "https://libraries.minecraft.net/"
+RESOURCE_BASE = "https://resources.download.minecraft.net/"
+FORGE_PROMOS = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
+FORGE_MAVEN = "https://maven.minecraftforge.net"
+ADOPTIUM_API = "https://api.adoptium.net/v3/binary/latest/{major}/ga/windows/x64/jdk/hotspot/normal/eclipse"
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+GAME_DIR = os.environ.get("BLEMM_DIR", os.path.join(ROOT, "minecraft"))
+ASSETS = os.path.join(GAME_DIR, "assets")
+LIBS = os.path.join(GAME_DIR, "libraries")
+TOOLS = os.path.join(GAME_DIR, "tools")   # bundled java, forge installers
+
+def log(msg): print(f"[Blemm] {msg}")
+
+# ---------- tiny helpers ----------
+def os_name(): return {"Windows": "windows", "Darwin": "osx"}.get(platform.system(), "linux")
+def file_sha1(p):
+    h = hashlib.sha1()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 16), b""): h.update(chunk)
+    return h.hexdigest()
+
+def download(url, dest, sha1=None):
+    dest = os.path.normpath(dest)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if os.path.exists(dest) and (sha1 is None or file_sha1(dest) == sha1): return
+    tmp = dest + ".part"
+    req = urllib.request.Request(url, headers={"User-Agent": f"{LAUNCHER_NAME}/{LAUNCHER_VERSION}"})
+    with urllib.request.urlopen(req) as r, open(tmp, "wb") as f: shutil.copyfileobj(r, f)
+    os.replace(tmp, dest)
+
+def fetch_json(url):
+    with urllib.request.urlopen(url) as r: return json.load(r)
+
+def maven_path(name):
+    g, aid, ver, *ext = name.split(":")
+    return f"{g.replace('.', '/')}/{aid}/{ver}/{aid}-{ver}{'-' + ext[0] if ext else ''}.jar"
+
+# ---------- Java (auto-download for exe users with no Java) ----------
+def java_bin_for(version_id):
+    exe = "java.exe" if os_name() == "windows" else "java"
+    env = shutil.which(exe)
+    if env: return env
+    major = "21" if _mc_major(version_id) >= 21 else "17"
+    jdir = os.path.join(TOOLS, f"java-{major}")
+    jbin = os.path.join(jdir, "bin", exe)
+    if not os.path.exists(jbin):
+        log(f"No system Java found - downloading Temurin JDK {major} (one time)...")
+        os.makedirs(TOOLS, exist_ok=True)
+        zpath = os.path.join(TOOLS, f"jdk{major}.zip")
+        download(ADOPTIUM_API.format(major=major), zpath)
+        with tempfile.TemporaryDirectory() as td:
+            with zipfile.ZipFile(zpath) as z: z.extractall(td)
+            inner = os.listdir(td)[0]
+            os.replace(os.path.join(td, inner), jdir)
+        os.remove(zpath)
+        if os_name() != "windows":
+            import stat
+            for r, _, fs in os.walk(jdir):
+                for f in fs:
+                    p = os.path.join(r, f)
+                    st = os.stat(p)
+                    os.chmod(p, st.st_mode | stat.S_IEXEC)
+    return jbin
+
+def _mc_major(version_id):
+    try: return int(version_id.split(".")[1])
+    except Exception: return 20
+
+# ---------- manifest / versions ----------
+def manifest(): return fetch_json(MANIFEST_URL)
+
+def list_versions():
+    m = manifest()
+    return [v["id"] for v in m["versions"]], m["latest"]["release"], m["latest"]["snapshot"]
+
+def resolve_version(version_id, m):
+    if version_id in (None, "", "release"): return m["latest"]["release"]
+    if version_id == "snapshot": return m["latest"]["snapshot"]
+    if not any(v["id"] == version_id for v in m["versions"]):
+        # maybe a Forge version installed locally, e.g. "1.20.1-forge-47.2.0"
+        if os.path.exists(os.path.join(GAME_DIR, "versions", version_id, version_id + ".json")):
+            return version_id
+        sys.exit(f"[Blemm] Unknown version '{version_id}'.")
+    return version_id
+
+def load_version_json(vid, m):
+    """Load version JSON, resolving Forge-style 'inheritsFrom' parents."""
+    path = os.path.join(GAME_DIR, "versions", vid, vid + ".json")
+    if not os.path.exists(path):
+        vurl = next(v["url"] for v in m["versions"] if v["id"] == vid)
+        download(vurl, path)
+    vj = json.load(open(path, encoding="utf-8"))
+    if "inheritsFrom" in vj:                       # forge: merge parent vanilla json
+        parent = load_version_json(vj["inheritsFrom"], m)
+        vj["libraries"] = vj.get("libraries", []) + parent.get("libraries", [])
+        pj, cj = parent.get("arguments", {}), vj.get("arguments", {})
+        vj["arguments"] = {
+            "game":  pj.get("game", []) + cj.get("game", []),
+            "jvm":   pj.get("jvm", []) + cj.get("jvm", []),
+        }
+        vj.setdefault("mainClass", parent["mainClass"])
+        vj.setdefault("assetIndex", parent.get("assetIndex"))
+        vj.setdefault("downloads", parent.get("downloads"))
+        vj.setdefault("logging", parent.get("logging"))
+        # make the vanilla client jar available too
+        vj["_vanilla_id"] = vj["inheritsFrom"]
+    else:
+        vj["_vanilla_id"] = vid
+    d = vj["downloads"]["client"]
+    jar = os.path.join(GAME_DIR, "versions", vj["_vanilla_id"], vj["_vanilla_id"] + ".jar")
+    download(d["url"], jar, d.get("sha1"))
+    return vj
+
+# ---------- rules / libraries / natives ----------
+def rule_matches(rule):
+    if "os" not in rule: return True
+    osr = rule["os"]
+    if osr.get("name") and osr["name"] != os_name(): return False
+    return True
+
+def is_allowed(rules):
+    if not rules: return True
+    return any(r.get("action") == "allow" and rule_matches(r) for r in rules if rule_matches(r)) or \
+           (all(rule_matches(r) for r in rules) and rules[-1].get("action") == "allow")
+
+def install_libraries(vj):
+    natives_dir = os.path.join(GAME_DIR, "natives", vj["id"] if "id" in vj else vj["_vanilla_id"])
+    natives_dir = os.path.join(GAME_DIR, "natives", vj.get("id", vj["_vanilla_id"]))
+    os.makedirs(natives_dir, exist_ok=True)
+    classpath, seen = [], set()
+    for lib in vj.get("libraries", []):
+        if not is_allowed(lib.get("rules")): continue
+        dl = lib.get("downloads", {})
+        art = dl.get("artifact")
+        rp = art["path"] if art else maven_path(lib["name"])
+        if rp in seen or not rp: continue
+        seen.add(rp)
+        jar = os.path.join(LIBS, rp)
+        url = (art.get("url") if art else None) or (LIB_BASE + rp) or (FORGE_MAVEN + "/" + rp)
+        if url:
+            try: download(url, jar, art.get("sha1") if art else None)
+            except Exception:
+                download(f"{FORGE_MAVEN}/{rp}", jar)   # forge reflection sl4j etc live on forge maven
+        classpath.append(jar)
+        classifier = lib.get("natives", {}).get(os_name())
+        if classifier:
+            nart = dl.get("classifiers", {}).get(classifier)
+            if nart:
+                njar = os.path.join(LIBS, nart["path"])
+                download(nart["url"], njar, nart.get("sha1"))
+                with zipfile.ZipFile(njar) as z:
+                    for info in z.infolist():
+                        n = os.path.basename(info.filename)
+                        if info.filename.startswith("META-INF/") or n.endswith((".sha1", ".sha", ".git")): continue
+                        if n:
+                            with z.open(info) as s, open(os.path.join(natives_dir, n), "wb") as o:
+                                shutil.copyfileobj(s, o)
+    return classpath, natives_dir
+
+def install_assets(vj):
+    idx = vj.get("assetIndex")
+    if not idx: return vj.get("assets", "legacy")
+    idp = os.path.join(ASSETS, "indexes", idx["id"] + ".json")
+    download(idx["url"], idp, idx.get("sha1"))
+    objects = json.load(open(idp, encoding="utf-8")).get("objects", {})
+    log(f"Checking {len(objects)} assets (only missing ones download)...")
+    for name, obj in objects.items():
+        h = obj["hash"]
+        try: download(RESOURCE_BASE + f"{h[:2]}/{h}", os.path.join(ASSETS, "objects", h[:2], h), h)
+        except Exception as e: log(f"  ! {name}: {e}")
+    return idx["id"]
+
+# ---------- OptiFine ----------
+def install_optifine(installer_jar, with_forge=False):
+    """Extracts the real OptiFine jar from its installer (MultiMC trick).
+    with_forge=True: installs it as a mod in mods/ (required for Forge 1.13+)."""
+    vid_dir = os.path.join(GAME_DIR, "mods" if with_forge else "optifine")
+    os.makedirs(vid_dir, exist_ok=True)
+    needy = os.path.join(vid_dir, os.path.basename(installer_jar).replace("_installer", ""))
+    if os.path.exists(needy): return needy
+    work = tempfile.mkdtemp()
+    r = subprocess.run(["java", "-jar", os.path.abspath(installer_jar), "extract"],
+                       cwd=work, capture_output=True)
+    jars = [f for f in os.listdir(work) if f.endswith(".jar")]
+    if r.returncode != 0 or not jars:
+        print(r.stdout.decode(errors="replace"), r.stderr.decode(errors="replace"))
+        sys.exit("[Blemm] OptiFine extract failed - is that the official installer jar?")
+    shutil.move(os.path.join(work, jars[0]), needy)
+    log(f"OptiFine ready: {needy}" + (" (installed as Forge mod)" if with_forge else ""))
+    return needy
+
+# ---------- Forge ----------
+def install_forge(mc_version, build=None):
+    """Runs the official Forge installer into our portable game dir, returns version id."""
+    if build in (None, "recommended", "latest"):
+        promos = fetch_json(FORGE_PROMOS)["promos"]
+        build = promos.get(f"{mc_version}-recommended") or promos.get(f"{mc_version}-latest")
+        if not build: sys.exit(f"[Blemm] No Forge build for {mc_version}")
+    vid = f"{mc_version}-forge-{build}"
+    if os.path.exists(os.path.join(GAME_DIR, "versions", vid, vid + ".json")):
+        log(f"Forge {vid} already installed."); return vid
+    # download vanilla first (forge installer likes it present)
+    m = manifest()
+    load_version_json(resolve_version(mc_version, m), m)
+    os.makedirs(TOOLS, exist_ok=True)
+    installer = os.path.join(TOOLS, f"forge-{vid}-installer.jar")
+    download(f"{FORGE_MAVEN}/net/minecraftforge/forge/{mc_version}-{build}/forge-{mc_version}-{build}-installer.jar", installer)
+    log(f"Running Forge installer for {vid} ...")
+    java = shutil.which("java") or java_bin_for(mc_version)
+    r = subprocess.run([java, "-jar", installer, "--installClient"], cwd=GAME_DIR, capture_output=True)
+    if not os.path.exists(os.path.join(GAME_DIR, "versions", vid, vid + ".json")):
+        print(r.stdout.decode(errors="replace"), r.stderr.decode(errors="replace"))
+        sys.exit("[Blemm] Forge install failed. See output above.")
+    log(f"Forge installed: {vid}")
+    return vid
+
+# ---------- content: mods, resourcepacks, shaders ----------
+def detect_kind(path):
+    """Sniffs a jar/zip to figure out what it is."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = set(z.namelist())
+    except zipfile.BadZipFile:
+        return None
+    if "fabric.mod.json" in names or "mcmod.info" in names or "META-INF/mods.toml" in names \
+       or "quilt.mod.json" in names or any(n == "architectury.common.json" for n in names):
+        return "mod"
+    if "pack.mcmeta" in names:
+        return "shaderpack" if any(n.startswith("shaders/") for n in names) else "resourcepack"
+    return None
+
+def add_content(paths):
+    """Auto-routes files: mods -> mods/, packs -> resourcepacks/, shaders -> shaderpacks/."""
+    routed = {}
+    for p in paths:
+        kind = detect_kind(p) if p.lower().endswith((".zip", ".jar")) else None
+        sub = {"mod": "mods", "resourcepack": "resourcepacks", "shaderpack": "shaderpacks"}
+        if not kind:
+            ext = os.path.splitext(p)[1].lower()
+            guess = input(f"What is {os.path.basename(p)}? [mod/resourcepack/shaderpack]: ").strip().lower()
+            kind = {"m": "mod", "mod": "mod", "r": "resourcepack", "s": "shaderpack"}.get(guess)
+            if not kind: continue
+        dest_dir = os.path.join(GAME_DIR, sub[kind])
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.copy2(p, dest_dir)
+        routed.setdefault(kind, []).append(os.path.basename(p))
+        if kind == "resourcepack": enable_resourcepack(os.path.basename(p))
+    for kind, files in routed.items(): log(f"{kind}: added {', '.join(files)}")
+
+def enable_resourcepack(filename):
+    """Writes the pack into options.txt so it's on by default."""
+    opts_path = os.path.join(GAME_DIR, "options.txt")
+    entry, lines = f'resourcePacks:["file:{filename}"]', []
+    if os.path.exists(opts_path): lines = open(opts_path, encoding="utf-8").read().splitlines()
+    lines = [l for l in lines if not l.startswith("resourcePacks:")] + [entry]
+    if not any(l.startswith("incompatibleResourcePacks:") for l in lines):
+        lines.append("incompatibleResourcePacks:[]")
+    open(opts_path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+    if not os.path.exists(os.path.join(GAME_DIR, "resourcepacks", filename)):
+        return
+    log(f"Resource pack enabled by default: {filename}")
+
+# ---------- launch ----------
+def subst(s, subs):
+    for k, v in subs.items(): s = s.replace(k, v)
+    return s
+
+def resolve_arglist(items, subs):
+    out = []
+    for a in items:
+        if isinstance(a, str): out.append(subst(a, subs))
+        elif is_allowed(a.get("rules")):
+            v = a["value"]; out.extend(subst(x, subs) for x in (v if isinstance(v, list) else [v]))
+    return out
+
+def launch(version_id, username="Blemm", ram="2G", optifine=None, vanilla_fallback=True):
+    if version_id and "-forge-" in version_id and not os.path.exists(
+            os.path.join(GAME_DIR, "versions", version_id, version_id + ".json")):
+        sys.exit(f"[Blemm] Forge version '{version_id}' not installed. Run: blemm forge {version_id.split('-forge-')[0]}")
+    m = manifest()
+    vid = resolve_version(version_id, m)
+    vj = load_version_json(vid, m)
+    java = java_bin_for(vid)
+    vanilla_jar = os.path.join(GAME_DIR, "versions", vj["_vanilla_id"], vj["_vanilla_id"] + ".jar")
+    classpath, natives_dir = install_libraries(vj)
+    classpath.insert(0, vanilla_jar)
+    asset_id = install_assets(vj)
+    game_args = vj.get("arguments", {}).get("game") or vj["minecraftArguments"].split()
+    jvm_args = vj.get("arguments", {}).get("jvm") or \
+        ["-Djava.library.path=${natives_directory}", "-cp", "${classpath}"]
+    optifine_jar = None
+    if optifine:
+        vanilla_id = vj["_vanilla_id"]
+        optifine_jar = install_optifine(optifine, with_forge=("-forge-" in vid))
+    if optifine_jar and "-forge-" not in vid:
+        classpath.append(optifine_jar)
+        short = vid.split(".")[1]
+        if short.isdigit() and int(short) < 13:
+            game_args += ["--tweakClass", "optifine.OptiFineTweaker"]
+            # pre-1.13 OptiFine needs launchwrapper; swap mainClass
+        else:
+            game_args += ["--tweakClass", "optifine.OptiFineTweaker"]
+    subs = {
+        "${auth_player_name}": username,
+        "${auth_uuid}": str(uuid.uuid3(uuid.NAMESPACE_OID, "offline:" + username)),
+        "${auth_access_token}": "0", "${auth_session}": "0",
+        "${user_type}": "legacy", "${user_properties}": "{}",
+        "${version_name}": vid, "${version_type}": LAUNCHER_NAME,
+        "${game_directory}": os.path.abspath(GAME_DIR),
+        "${assets_root}": os.path.abspath(ASSETS), "${assets_index_name}": asset_id,
+        "${game_assets}": os.path.join(ASSETS, "virtual", asset_id),
+        "${natives_directory}": os.path.abspath(natives_dir),
+        "${launcher_name}": LAUNCHER_NAME, "${launcher_version}": LAUNCHER_VERSION,
+        "${classpath}": os.pathsep.join(classpath), "${classpath_separator}": os.pathsep,
+        "${library_directory}": os.path.abspath(LIBS),
+        "${primary_jar}": os.path.abspath(vanilla_jar),
+        "${clientid}": "0" * 32, "${auth_xuid}": "0",
+    }
+    cmd = [java, "-Xms512M", f"-Xmx{ram}"]
+    log_cfg = vj.get("logging", {}).get("client", {})
+    if log_cfg:
+        lf = os.path.join(GAME_DIR, "log-configs", log_cfg["file"]["id"])
+        download(log_cfg["file"]["url"], lf, log_cfg["file"].get("sha1"))
+        cmd.append(f"-Dlog4j.configurationFile={os.path.abspath(lf)}")
+    cmd += resolve_arglist(jvm_args, subs) + [vj["mainClass"]] + resolve_arglist(game_args, subs)
+    os.makedirs(GAME_DIR, exist_ok=True)
+    log(f"Launching {vid} as {username}...")
+    subprocess.run(cmd, cwd=GAME_DIR)
