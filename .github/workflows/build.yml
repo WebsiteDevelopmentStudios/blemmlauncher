@@ -21,8 +21,8 @@ jobs:
       - name: Build exe
         shell: pwsh
         run: |
-          pyinstaller --onefile --noconsole --name BlemmLauncher `
-            --add-data "blemmlauncher/gui.py;blemmlauncher" `
+          pyinstaller --onefile --noconsole --uac-admin --name BlemmLauncher `
+            --collect-submodules blemmlauncher `
             run.py
 
       - name: Upload artifact (every push)
