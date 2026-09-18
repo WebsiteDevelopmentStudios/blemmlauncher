@@ -158,26 +158,105 @@ def install_loader(loader, mc_version, build=None):
     raise RuntimeError(f"unknown loader {loader}")
 
 # ---------- Modrinth ----------
+MODRINTH_API = "https://api.modrinth.com/v2"
+
+def _modrinth_json(path, params=None):
+    """Fetch JSON from Modrinth with proper URL encoding and useful errors."""
+    url = MODRINTH_API + path
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "BlemmLauncher/1.3.0",
+        "Accept": "application/json",
+    })
+
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        raise RuntimeError(
+            f"Modrinth API error (HTTP {e.code}): {body[:500]}"
+        ) from e
+    except Exception as e:
+        raise RuntimeError(f"Modrinth API request failed: {e}") from e
+
+
 def modrinth_search(query, mc_version, loader=None):
-    facets = [f'["versions:{mc_version}"]']
-    if loader: facets.append(f'["categories:{loader}"]')
-    url = ("https://api.modrinth.com/v2/search?limit=12&query=" +
-           urllib.parse.quote(query) + "&facets=[" + ",".join(f'"{f.strip(chr(34))}"' for f in facets) + "]")
-    url = ("https://api.modrinth.com/v2/search?limit=12&query=" +
-           urllib.parse.quote(query) +
-           '&facets=[["versions:' + mc_version + '"]' +
-           (f',"categories:{loader}"' if loader else "") + ']')
-    hits = _fetch_json(url)["hits"]
-    return [{"title": h["title"], "id": h["project_id"], "desc": h["description"][:80],
-             "downs": h["downloads"], "author": h["author"], "icon": h.get("icon_url")}
-            for h in hits]
+    """Search Modrinth for projects compatible with a Minecraft version."""
+    # Modrinth facets are JSON arrays. Build the JSON first, then let
+    # urlencode() correctly escape brackets, quotes, spaces, etc.
+    facets = [[f"versions:{mc_version}"]]
+
+    if loader:
+        loader = loader.lower().strip()
+        facets.append([f"categories:{loader}"])
+
+    data = _modrinth_json("/search", {
+        "limit": "12",
+        "query": query or "",
+        "facets": json.dumps(facets, separators=(",", ":")),
+    })
+
+    results = []
+    for h in data.get("hits", []):
+        results.append({
+            "title": h.get("title", "Unknown"),
+            "id": h.get("project_id", ""),
+            "desc": (h.get("description") or "")[:80],
+            "downs": h.get("downloads", 0),
+            "author": h.get("author", "Unknown"),
+            "icon": h.get("icon_url"),
+        })
+
+    return results
+
 
 def modrinth_install(project_id, mc_version, loader=None):
-    url = (f"https://api.modrinth.com/v2/project/{project_id}/version"
-           f'?game_versions=["{mc_version}"]' + (f'&loaders=["{loader}"]' if loader else ""))
-    ver = _fetch_json(url)[0]
+    """Install the first compatible Modrinth file."""
+    params = {
+        "game_versions": json.dumps([mc_version], separators=(",", ":")),
+    }
+
+    if loader:
+        params["loaders"] = json.dumps(
+            [loader.lower().strip()],
+            separators=(",", ":")
+        )
+
+    versions = _modrinth_json(
+        f"/project/{urllib.parse.quote(project_id, safe='')}/version",
+        params
+    )
+
+    if not versions:
+        raise RuntimeError(
+            f"No Modrinth version found for {project_id} on Minecraft "
+            f"{mc_version}" + (f" with {loader}" if loader else "")
+        )
+
+    ver = versions[0]
+    files = ver.get("files", [])
+
+    if not files:
+        raise RuntimeError(
+            f"Modrinth version {ver.get('id', '?')} has no downloadable files"
+        )
+
+    # Prefer the file Modrinth marks as primary.
+    f = next((x for x in files if x.get("primary")), files[0])
+
+    url = f.get("url")
+    filename = f.get("filename")
+
+    if not url or not filename:
+        raise RuntimeError("Modrinth returned an invalid file entry")
+
     from . import core
-    f = [x for x in ver["files"] if x["primary"]][0] if "primary" in ver["files"][0] else ver["files"][0]
-    dest = os.path.join(core.GAME_DIR, "mods", f["filename"])
-    _download(f["url"], dest)
-    return f["filename"]
+    dest = os.path.join(core.GAME_DIR, "mods", filename)
+    _download(url, dest)
+    return filename
