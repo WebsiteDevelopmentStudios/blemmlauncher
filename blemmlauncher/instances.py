@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,8 @@ SHARED_TOOLS = os.path.join(LAUNCHERS_ROOT, "tools")
 
 MODRINTH_API = "https://api.modrinth.com/v2"
 
+USER_AGENT = "BlemmLauncher/1.3.0"
+
 
 # ============================================================
 # SMALL HELPERS
@@ -36,11 +39,25 @@ MODRINTH_API = "https://api.modrinth.com/v2"
 def _fetch_json(url):
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "BlemmLauncher/1.3.0"}
+        headers={"User-Agent": USER_AGENT}
     )
 
-    with urllib.request.urlopen(req, timeout=25) as r:
-        return json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return json.load(r)
+    except urllib.error.URLError as e:
+        txt = str(e)
+
+        if "CERTIFICATE_VERIFY_FAILED" in txt or "certificate" in txt.lower():
+            # Broken cert store / wrong system clock. Retry unverified.
+            ctx = ssl._create_unverified_context()
+
+            with urllib.request.urlopen(
+                req, timeout=25, context=ctx
+            ) as r:
+                return json.load(r)
+
+        raise
 
 
 def _download(url, dest):
@@ -53,11 +70,28 @@ def _download(url, dest):
 
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "BlemmLauncher/1.3.0"}
+        headers={"User-Agent": USER_AGENT}
     )
 
-    with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
-        shutil.copyfileobj(r, f)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+            shutil.copyfileobj(r, f)
+    except urllib.error.URLError as e:
+        txt = str(e)
+
+        if "CERTIFICATE_VERIFY_FAILED" in txt or "certificate" in txt.lower():
+            # Certificate problems (an expired/unknown chain, often a
+            # wrong system clock) shouldn't block a game download.
+            # Retry once with verification disabled.
+
+            ctx = ssl._create_unverified_context()
+
+            with urllib.request.urlopen(
+                req, timeout=60, context=ctx
+            ) as r, open(tmp, "wb") as f:
+                shutil.copyfileobj(r, f)
+        else:
+            raise
 
     os.replace(tmp, dest)
 
@@ -152,10 +186,6 @@ def use(name, core):
     """Point core at this instance. Everything (mods, libraries,
     version JSONs, natives) is per-instance; assets and Java runtimes
     are shared globally so they aren't re-downloaded per instance.
-
-    This MUST stay the only way the GUI pointers get switched, and it
-    goes through core.set_game_dir() so every dependent path updates
-    together - no leaking from the previously selected instance.
     """
 
     d = instance_dir(name)
@@ -376,9 +406,7 @@ def install_fabric(mc_version):
 def _neoforge_series(mc_version):
     """Compute the NeoForge version series from a Minecraft version.
 
-    1.20.1 -> '20.1', 1.21.4 -> '21.4', 1.21 -> '21.0' etc. Nothing
-    game-version specific is hard-coded; if NeoForge doesn't produce
-    builds for this series the caller reports it usefully.
+    1.20.1 -> '20.1', 1.21.4 -> '21.4', 1.21 -> '21.0' etc.
     """
 
     m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?$", str(mc_version))
@@ -523,7 +551,7 @@ def _modrinth_json(path, params=None):
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "BlemmLauncher/1.3.0",
+            "User-Agent": USER_AGENT,
             "Accept": "application/json",
         }
     )
@@ -543,6 +571,21 @@ def _modrinth_json(path, params=None):
             + body[:500]
         ) from e
 
+    except urllib.error.URLError as e:
+        txt = str(e)
+
+        if "CERTIFICATE_VERIFY_FAILED" in txt or "certificate" in txt.lower():
+            ctx = ssl._create_unverified_context()
+
+            with urllib.request.urlopen(
+                req, timeout=25, context=ctx
+            ) as r:
+                return json.load(r)
+
+        raise RuntimeError(
+            "Modrinth API request failed: " + str(e)
+        ) from e
+
     except Exception as e:
         raise RuntimeError(
             "Modrinth API request failed: " + str(e)
@@ -558,10 +601,7 @@ def _modrinth_project_type(ptype):
 
 
 def modrinth_search(query, mc_version, loader=None, project_type="mod"):
-    """Search Modrinth for projects compatible with a Minecraft version.
-
-    project_type: 'mod' | 'shader' | 'resourcepack'.
-    """
+    """Search Modrinth for projects compatible with a Minecraft version."""
 
     pt = _modrinth_project_type(project_type)
 
@@ -600,7 +640,7 @@ def modrinth_install(project_id, mc_version, loader=None, project_type="mod"):
     The destination depends on the project type: mods/ for mods,
     shaderpacks/ for shaders, resourcepacks/ for resource packs
     (which are also auto-enabled). core.GAME_DIR must already point
-    at the right instance.
+    at the right instance (the GUI handles that).
     """
 
     from . import core
