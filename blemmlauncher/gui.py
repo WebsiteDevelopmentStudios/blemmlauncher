@@ -407,7 +407,7 @@ class App:
                 reverse=True
             )
 
-            self.q.put(("versions", chosen, latest))
+            self.q.put(("versions", chosen, latest, None))
 
         except Exception as e:
             self.q.put(
@@ -439,6 +439,7 @@ class App:
 
         if name in names:
             idx = list(names).index(name)
+            self.ilist.selection_clear(0, "end")
             self.ilist.selection_set(idx)
             self.ilist.activate(idx)
             self.ilist.see(idx)
@@ -631,6 +632,8 @@ class App:
         d.geometry("440x330")
         d.grab_set()
 
+        style_dark(d)
+
         f = ttk.Frame(d, style="Card.TFrame", padding=14)
         f.pack(fill="both", expand=True)
 
@@ -725,8 +728,6 @@ class App:
             pady=(8, 0)
         )
 
-        # Fill the version dropdown (main thread data, or fetch fresh).
-
         def fill_versions():
             try:
                 if self._all_versions:
@@ -776,11 +777,11 @@ class App:
             threading.Thread(target=fill_versions, daemon=True).start()
 
         def go():
-            base = name.get().strip() or "Client"
+            base_name = name.get().strip() or "Client"
             mc = version.get() if needs_version else None
 
             into_selected = (
-                "selected instance" in target.get()
+                target.get().startswith("selected instance")
                 and self.sel
                 and kind == "mod"
             )
@@ -791,21 +792,19 @@ class App:
                 d.destroy()
 
                 self.play_btn.config(state="disabled", text="Importing…")
+                self.status.config(text="Importing client…", foreground=FG)
 
-                self.status.config(
-                    text="Importing client…",
-                    foreground=FG
-                )
+                src_path = path
 
                 def worker():
                     try:
                         result_name, what = instances.import_client(
-                            path,
+                            src_path,
                             instance_name=instance_name,
                             mc_version=mc,
                             loader=None,
                             ram="4G",
-                            username="Blemm"
+                            username=base_name
                         )
 
                         self.q.put(
@@ -814,7 +813,12 @@ class App:
 
                     except Exception as e:
                         self.q.put(
-                            ("fatal", "client import failed:\n" + str(e), None, None)
+                            (
+                                "fatal",
+                                "client import failed:\n" + str(e),
+                                None,
+                                None
+                            )
                         )
 
                 threading.Thread(target=worker, daemon=True).start()
@@ -822,14 +826,12 @@ class App:
             except Exception as e:
                 messagebox.showerror("Blemm", str(e), parent=d)
 
-        go_btn = ttk.Button(
+        ttk.Button(
             f,
             text="Import",
             style="Play.TButton",
             command=go
-        )
-
-        go_btn.grid(
+        ).grid(
             row=len(rows) + 1,
             column=0,
             columnspan=2,
@@ -1359,15 +1361,28 @@ class App:
         self.log.config(state="disabled")
 
     # ================================================================
-    # Queue drain - runs every 100ms on the Tk main thread
+    # Queue drain - runs every 100ms on the Tk main thread.
+    # Every message is a 4-tuple (kind, text, done, total). The
+    # unpack is defensive so ONE bad message can never kill the
+    # pump - which previously froze the GUI on "Preparing…" forever.
     # ================================================================
 
     def _drain(self):
         dialogs = []
 
-        try:
-            while True:
-                kind, text, done, total = self.q.get_nowait()
+        while True:
+            item = None
+
+            try:
+                item = self.q.get_nowait()
+            except queue.Empty:
+                break
+
+            try:
+                kind = item[0]
+                text = item[1] if len(item) > 1 else ""
+                done = item[2] if len(item) > 2 else None
+                total = item[3] if len(item) > 3 else None
 
                 if kind == "stage":
                     if total:
@@ -1400,7 +1415,7 @@ class App:
 
                 elif kind == "client_imported":
                     result_name = text
-                    what = done  # slot reuse: 'done' carries the description
+                    what = done
 
                     self.play_btn.config(
                         state="normal",
@@ -1468,8 +1483,12 @@ class App:
                     if kind == "fatal":
                         dialogs.append(text)
 
-        except queue.Empty:
-            pass
+            except Exception as e:
+                # One malformed message must never kill the queue pump.
+
+                self.log_message(
+                    "WARNING: dropped a malformed UI message (" + str(e) + ")"
+                )
 
         for message_text in dialogs:
             messagebox.showerror("BlemmLauncher", message_text)
