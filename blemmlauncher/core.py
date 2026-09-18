@@ -1,7 +1,9 @@
 """BlemmLauncher core - versions, Forge, OptiFine, mods, packs, Java, progress."""
+import socket
+socket.setdefaulttimeout(25)
 import hashlib, json, os, platform, shutil, subprocess, sys, tempfile, urllib.request, uuid, zipfile
 
-LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.1.1"
+LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.1.2"
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 LIB_BASE = "https://libraries.minecraft.net/"
 RESOURCE_BASE = "https://resources.download.minecraft.net/"
@@ -43,7 +45,7 @@ def file_sha1(p):
 
 def _open(url):
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    return urllib.request.urlopen(req, timeout=60)
+    return urllib.request.urlopen(req, timeout=25)
 
 def download(url, dest, sha1=None):
     dest = os.path.normpath(dest)
@@ -56,7 +58,6 @@ def download(url, dest, sha1=None):
             break
         except Exception as e:
             if attempt == 3:
-                # say WHICH url failed - no more mystery errors
                 raise RuntimeError(f"download failed: {url} -> {e}") from e
             import time; time.sleep(1 * attempt)
     os.replace(tmp, dest)
@@ -99,7 +100,17 @@ def _mc_major(version_id):
     except Exception: return 20
 
 # ---------- manifest / versions ----------
-def manifest(): return fetch_json(MANIFEST_URL)
+def manifest():
+    for attempt in (1, 2, 3):
+        try:
+            return fetch_json(MANIFEST_URL)
+        except Exception as e:
+            if attempt == 3:
+                raise RuntimeError(
+                    f"can't reach Mojang (attempt 3): {e}\n"
+                    f"check internet / firewall / proxy, then retry"
+                ) from e
+            log(f"manifest fetch failed ({e}) - retrying...")
 
 def list_versions():
     m = manifest()
@@ -111,7 +122,7 @@ def resolve_version(version_id, m):
     if not any(v["id"] == version_id for v in m["versions"]):
         if os.path.exists(os.path.join(GAME_DIR, "versions", version_id, version_id + ".json")):
             return version_id
-        sys.exit(f"[Blemm] Unknown version '{version_id}'.")
+        raise RuntimeError(f"Unknown version '{version_id}'.")
     return version_id
 
 def load_version_json(vid, m):
@@ -179,8 +190,9 @@ def install_libraries(vj):
         try:
             download(url, jar, art.get("sha1") if art else None)
         except Exception:
-            if url.startswith(LIB_BASE):
-                download(FORGE_MAVEN + "/" + rp, jar)   # forge mirrors many mojang libs
+            if url.startswith(LIB_BASE) or url.startswith(FORGE_MAVEN):
+                other = LIB_BASE if url.startswith(FORGE_MAVEN) else FORGE_MAVEN
+                download(other + rp, jar)
         classpath.append(jar)
         classifier = lib.get("natives", {}).get(os_name())
         if classifier:
@@ -213,8 +225,7 @@ def install_assets(vj):
 
 # ---------- OptiFine ----------
 def install_optifine(installer_jar, with_forge=False):
-    """Extracts the real OptiFine jar from its installer (MultiMC trick).
-    with_forge=True puts it in mods/ as a Forge mod."""
+    """Extracts the real OptiFine jar from its installer (MultiMC trick)."""
     vid_dir = os.path.join(GAME_DIR, "mods" if with_forge else "optifine")
     os.makedirs(vid_dir, exist_ok=True)
     out = os.path.join(vid_dir, os.path.basename(installer_jar).replace("_installer", ""))
@@ -226,7 +237,7 @@ def install_optifine(installer_jar, with_forge=False):
     jars = [f for f in os.listdir(work) if f.endswith(".jar")]
     if r.returncode != 0 or not jars:
         print(r.stdout.decode(errors="replace"), r.stderr.decode(errors="replace"))
-        sys.exit("[Blemm] OptiFine extract failed - is that the official installer jar?")
+        raise RuntimeError("OptiFine extract failed - is that the official installer jar?")
     shutil.move(os.path.join(work, jars[0]), out)
     log(f"OptiFine ready: {out}" + (" (installed as Forge mod)" if with_forge else ""))
     return out
@@ -236,7 +247,7 @@ def install_forge(mc_version, build=None):
     if build in (None, "auto", "", "recommended", "latest"):
         promos = fetch_json(FORGE_PROMOS)["promos"]
         build = promos.get(f"{mc_version}-recommended") or promos.get(f"{mc_version}-latest")
-        if not build: sys.exit(f"[Blemm] No Forge build for {mc_version}")
+        if not build: raise RuntimeError(f"No Forge build for {mc_version}")
     vid = f"{mc_version}-forge-{build}"
     if os.path.exists(os.path.join(GAME_DIR, "versions", vid, vid + ".json")):
         log(f"Forge {vid} already installed."); return vid
@@ -250,7 +261,7 @@ def install_forge(mc_version, build=None):
     r = subprocess.run([java, "-jar", installer, "--installClient"], cwd=GAME_DIR, capture_output=True)
     if not os.path.exists(os.path.join(GAME_DIR, "versions", vid, vid + ".json")):
         print(r.stdout.decode(errors="replace"), r.stderr.decode(errors="replace"))
-        sys.exit("[Blemm] Forge install failed. See output above.")
+        raise RuntimeError("Forge install failed - see output above.")
     log(f"Forge installed: {vid}")
     return vid
 
