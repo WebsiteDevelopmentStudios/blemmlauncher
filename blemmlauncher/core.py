@@ -413,12 +413,19 @@ def subst(s, subs):
     return s
 
 def resolve_arglist(items, subs):
-    """Resolve Minecraft argument objects while respecting OS-specific rules.
+    """Resolve Minecraft arguments while respecting OS rules.
 
-    Some Forge/Minecraft version JSON files contain macOS-only JVM flags such
-    as -XstartOnFirstThread.  Never pass that flag on Windows or Linux.
+    Also removes Quick Play arguments. BlemmLauncher performs a normal
+    Minecraft launch, and Minecraft 1.21.11 crashes if more than one
+    Quick Play option is present.
     """
     out = []
+    quick_play_options = {
+        "--quickPlaySingleplayer",
+        "--quickPlayMultiplayer",
+        "--quickPlayRealms",
+    }
+
     for a in items:
         if isinstance(a, str):
             values = [a]
@@ -433,15 +440,20 @@ def resolve_arglist(items, subs):
         for value in values:
             value = subst(value, subs)
 
-            # This is a macOS-only JVM option.  Passing it to the Windows
-            # JVM causes an immediate startup failure:
-            # "Unrecognized option: -XstartOnFirstThread"
+            # This is a macOS-only JVM option. Passing it to the Windows
+            # JVM causes an immediate startup failure.
             if value == "-XstartOnFirstThread" and platform.system() != "Darwin":
+                continue
+
+            # BlemmLauncher performs a normal launch, so don't pass Quick Play
+            # arguments. Minecraft 1.21.11 throws if multiple are supplied.
+            if value in quick_play_options:
                 continue
 
             out.append(value)
 
     return out
+
 
 def launch(version_id, username="Blemm", ram="2G", optifine=None):
     m = manifest()
