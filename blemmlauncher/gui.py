@@ -70,7 +70,6 @@ class App:
         self.i_info = ttk.Label(right, text="", style="MutedP.TLabel", justify="left", anchor="w")
         self.i_info.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
-        # username + RAM (actually created now — this was the hidden bug)
         settings = ttk.Frame(right, style="Card.TFrame")
         settings.grid(row=2, column=0, columnspan=2, sticky="w")
         ttk.Label(settings, text="Username:", style="MutedP.TLabel").pack(side="left")
@@ -84,10 +83,10 @@ class App:
         self.play_btn = ttk.Button(right, text="▶   PLAY", style="Play.TButton",
                                    command=self.play, state="disabled")
         self.play_btn.grid(row=3, column=0, columnspan=2, sticky="we", pady=(12, 6))
-        ttk.Button(right, text="🔎 Browse mods (Modrinth)", command=self.browse_mods).grid(
-            row=4, column=0, columnspan=2, sticky="w")
-        ttk.Button(right, text="＋ add mod / pack file…", command=self.add_file).grid(
-            row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Button(right, text="🔎 Browse & install (Modrinth) — mods / shaders / packs",
+                   command=self.browse_mods).grid(row=4, column=0, columnspan=2, sticky="w")
+        ttk.Button(right, text="＋ add files… (Ctrl+click several: mods, packs, shaders)",
+                   command=self.add_file).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         # ---- status + log ----
         self.status = ttk.Label(root, text="Loading version list…", anchor="w")
@@ -108,15 +107,12 @@ class App:
     # ---------- version list ----------
     def _load_versions(self):
         try:
-            from .versions_meta import pretty
             versions, latest, _ = core.list_versions()
             def sk(v):
                 try: return [int(x) for x in v.split(".") if x.isdigit()]
                 except Exception: return [-1]
             chosen = sorted([v for v in versions if sk(v) >= [1, 12, 2] and "-" not in v
                              and not v.startswith(("w", "pre", "rc"))], key=sk, reverse=True)
-            labels = [pretty(v) for v in chosen]
-            self.version_map.update(zip(labels, chosen))
             self.q.put(("versions", chosen))
         except Exception as e:
             self.q.put(("error", f"version list failed: {e}"))
@@ -159,10 +155,8 @@ class App:
         name = tk.StringVar(); version = tk.StringVar(value="release")
         loader = tk.StringVar(value="vanilla"); ram = tk.StringVar(value="4G")
         uname = tk.StringVar(value="Blemm")
-
         rows = [("Name:", ttk.Entry(f, textvariable=name)),
-                ("Version:", ttk.Combobox(f, textvariable=version,
-                                          values=["release"] + list(self.version_map.values())[:60])),
+                ("Version:", ttk.Combobox(f, textvariable=version, values=["release"])),
                 ("Loader:", ttk.Combobox(f, textvariable=loader, state="readonly",
                                          values=["vanilla", "forge", "fabric", "neoforge"])),
                 ("RAM:", ttk.Combobox(f, textvariable=ram, state="readonly",
@@ -173,9 +167,29 @@ class App:
             widget.grid(row=r, column=1, sticky="we", pady=3, padx=(8, 0))
         f.columnconfigure(1, weight=1)
 
+        def fill_versions():
+            try:
+                versions, _, _ = core.list_versions()
+                def sk(v):
+                    try: return [int(x) for x in v.split(".") if x.isdigit()]
+                    except Exception: return [-1]
+                chosen = sorted([v for v in versions if sk(v) >= [1, 12, 2] and "-" not in v
+                                and not v.startswith(("w", "pre", "rc"))], key=sk, reverse=True)
+                widget = f.grid_slaves(row=1, column=1)[0]
+                widget.config(values=["release"] + chosen[:60])
+            except Exception:
+                pass
+        threading.Thread(target=fill_versions, daemon=True).start()
+
         def go():
             nm = name.get().strip() or "New Instance"
-            v = self.version_map.get(version.get(), version.get())
+            v = version.get()
+            if v == "release":
+                try:
+                    v = core.manifest()["latest"]["release"]
+                except Exception:
+                    messagebox.showerror("Blemm", "couldn't resolve 'release' - type a specific version", parent=d)
+                    return
             ld = loader.get(); ld = None if ld == "vanilla" else ld
             try:
                 instances.create(nm, v, ld, ram.get(), uname.get())
@@ -221,6 +235,7 @@ class App:
     def add_file(self):
         if not self.sel: return
         paths = filedialog.askopenfilenames(
+            title="Pick mods / packs (Ctrl+click for several)",
             filetypes=[("Minecraft files", "*.jar *.zip"), ("All files", "*.*")])
         if paths:
             core.GAME_DIR = instances.instance_dir(self.sel)
@@ -231,46 +246,61 @@ class App:
             except Exception as e:
                 messagebox.showerror("Blemm", str(e))
 
-    # ---------- modrinth ----------
+    # ---------- modrinth (multi-select) ----------
     def browse_mods(self):
         if not self.sel: return
-        d = tk.Toplevel(self.root); d.title(f"Modrinth mods — {self.sel}")
-        d.configure(bg=BG); style_dark(d); d.geometry("560x420")
+        d = tk.Toplevel(self.root); d.title(f"Modrinth — {self.sel}")
+        d.configure(bg=BG); style_dark(d); d.geometry("600x460")
         f = ttk.Frame(d, style="Card.TFrame", padding=10); f.pack(fill="both", expand=True)
         top = ttk.Frame(f, style="Card.TFrame"); top.pack(fill="x")
         q = tk.StringVar()
         ttk.Entry(top, textvariable=q).pack(side="left", fill="x", expand=True)
+        ptype = tk.StringVar(value="mod")
+        ttk.Combobox(top, textvariable=ptype, width=12, state="readonly",
+                     values=["mod", "shader", "resourcepack"]).pack(side="left", padx=6)
+        ttk.Button(top, text="Search", command=lambda: search()).pack(side="left", padx=6)
         results = tk.Listbox(f, bg=FIELD, fg=FG, relief="flat", highlightthickness=0,
-                            selectbackground=ACCENT, selectforeground="#10240f")
+                             selectbackground=ACCENT, selectforeground="#10240f",
+                             selectmode="extended", exportselection=False)
         results.pack(fill="both", expand=True, pady=8)
-        lbl = ttk.Label(f, text="type a mod name, press Search, double-click to install",
-                        style="MutedP.TLabel"); lbl.pack()
+        mid = ttk.Frame(f, style="Card.TFrame"); mid.pack(fill="x")
+        ttk.Button(mid, text="⬇  Install selected", style="Play.TButton",
+                   command=lambda: install()).pack(side="left")
+        lbl = ttk.Label(f, text="type a name, Search, Ctrl/Shift+click to multi-select, Install",
+                        style="MutedP.TLabel"); lbl.pack(anchor="w", pady=(6, 0))
         hits = []
-        loader = self.loader if self.loader else None
+        loader = self.loader if (self.loader and ptype.get() == "mod") else None
 
         def search():
             nonlocal hits
             try:
-                hits = instances.modrinth_search(q.get(), self.version, loader)
+                ld = self.loader if (self.loader and ptype.get() == "mod") else None
+                hits = instances.modrinth_search(q.get(), self.version, ld, ptype.get())
                 results.delete(0, "end")
                 for h in hits:
                     results.insert("end", f'{h["title"]}  —  {h["author"]}  ({h["downs"]}↓)')
-                lbl.config(text=f"{len(hits)} results for {self.version}"
-                          + (f" / {loader}" if loader else ""), foreground=FG)
+                lbl.config(text=f"{len(hits)} results for {self.version} / {ptype.get()}"
+                          + (f" / {self.loader}" if ld else ""), foreground=FG)
             except Exception as e:
                 lbl.config(text=f"search failed: {e}")
-        ttk.Button(top, text="Search", command=search).pack(side="left", padx=6)
 
         def install(_=None):
-            if not results.curselection(): return
-            h = hits[results.curselection()[0]]
-            try:
-                fn = instances.modrinth_install(h["id"], self.version, loader)
-                lbl.config(text=f"installed ✓ {fn}", foreground=ACCENT)
-                self._sel_ev()
-            except Exception as e:
-                lbl.config(text=f"install failed: {e}")
-        results.bind("<Double-Button-1>", install)
+            sel = results.curselection()
+            if not sel: return
+            ok, errs = [], []
+            for i in sel:
+                h = hits[i]
+                try:
+                    ld = self.loader if (self.loader and ptype.get() == "mod") else None
+                    fn = instances.modrinth_install(h["id"], self.version, ld, ptype.get())
+                    ok.append(fn)
+                except Exception as e:
+                    errs.append(f"{h['title']}: {e}")
+            msg = f"installed {len(ok)}: {', '.join(ok)}" if ok else ""
+            if errs: msg += "\nfailed: " + "; ".join(errs)
+            lbl.config(text=msg, foreground=ACCENT if ok and not errs else DANGER)
+            self._sel_ev()
+        results.bind("<Double-Button-1>", lambda e: None)  # keep single-click selection simple
 
     # ---------- play ----------
     def play(self):
