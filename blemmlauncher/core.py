@@ -2,6 +2,7 @@
 import socket
 socket.setdefaulttimeout(25)
 import hashlib, json, os, platform, shutil, subprocess, sys, tempfile, urllib.request, uuid, zipfile, glob
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.3.0"
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
@@ -221,17 +222,39 @@ def install_libraries(vj):
     return classpath, natives_dir
 
 def install_assets(vj):
+    """Download all asset objects for this version, in parallel, reporting
+    live (done, total) progress so the GUI can show a real progress bar
+    instead of appearing to freeze on this step."""
     idx = vj.get("assetIndex")
     if not idx: return vj.get("assets", "legacy")
     idp = os.path.join(ASSETS, "indexes", idx["id"] + ".json")
     download(idx["url"], idp, idx.get("sha1"))
     objects = json.load(open(idp, encoding="utf-8")).get("objects", {})
-    for i, (name, obj) in enumerate(objects.items()):
-        if i % 50 == 0:
-            report("Downloading game assets (biggest step, first time only)...", i, max(len(objects), 1))
+
+    items = list(objects.items())
+    total = max(len(items), 1)
+    done = 0
+
+    def _fetch(entry):
+        name, obj = entry
         h = obj["hash"]
-        try: download(RESOURCE_BASE + f"{h[:2]}/{h}", os.path.join(ASSETS, "objects", h[:2], h), h)
-        except Exception as e: log(f"  ! {name}: {e}")
+        try:
+            download(RESOURCE_BASE + f"{h[:2]}/{h}", os.path.join(ASSETS, "objects", h[:2], h), h)
+            return None
+        except Exception as e:
+            return f"{name}: {e}"
+
+    report("Downloading game assets (biggest step, first time only)...", 0, total)
+    with ThreadPoolExecutor(max_workers=24) as ex:
+        futures = [ex.submit(_fetch, item) for item in items]
+        for fut in as_completed(futures):
+            done += 1
+            if done % 25 == 0 or done == total:
+                report("Downloading game assets (biggest step, first time only)...", done, total)
+            err = fut.result()
+            if err:
+                log(f"  ! {err}")
+
     return idx["id"]
 
 # ---------- OptiFine ----------
