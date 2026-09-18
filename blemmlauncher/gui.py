@@ -4,7 +4,6 @@ from tkinter import ttk, filedialog, scrolledtext
 from . import core
 from .versions_meta import pretty
 
-# ---------- dark theme ----------
 BG, PANEL, FIELD = "#1e1f24", "#272930", "#2f323b"
 FG, MUTED, ACCENT, DANGER = "#e8e9ee", "#8b8fa3", "#4ade80", "#f87171"
 
@@ -34,16 +33,16 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("BlemmLauncher")
-        root.geometry("520x680"); root.minsize(520, 620)
+        root.geometry("520x700"); root.minsize(520, 640)
         root.configure(bg=BG)
         style_dark(root)
         self.version_map = {"Latest release": "release"}
+        self.optifine_path = None
 
         ttk.Label(root, text="◈ BlemmLauncher", style="Title.TLabel").pack(pady=(16, 2))
         ttk.Label(root, text="vanilla · forge · optifine · mods · textures · shaders",
                   style="Muted.TLabel").pack(pady=(0, 12))
 
-        # ---- main card ----
         card = ttk.Frame(root, style="Card.TFrame", padding=16)
         card.pack(fill="x", padx=18)
         card.columnconfigure(1, weight=1)
@@ -63,13 +62,25 @@ class App:
         self.ram.set("4G")
         row(2, "RAM", self.ram)
 
-        self.forge_on = tk.BooleanVar(value=False)
+        # ---- forge + optifine row ----
         forge_row = ttk.Frame(card, style="Card.TFrame")
         forge_row.grid(row=3, column=0, columnspan=2, sticky="w", pady=4)
+        self.forge_on = tk.BooleanVar(value=False)
         ttk.Checkbutton(forge_row, text="Use Forge", variable=self.forge_on,
                         command=self._toggle_forge).pack(side="left")
+        self.optifine_on = tk.BooleanVar(value=False)
+        self.optifine_ck = ttk.Checkbutton(forge_row, text="  Use OptiFine (Forge only)",
+                                           variable=self.optifine_on, state="disabled",
+                                           command=self._pick_optifine)
+        self.optifine_ck.pack(side="left")
+        ttk.Button(forge_row, text="pick jar…", command=self._pick_optifine).pack(side="left", padx=6)
+
         self.forge = ttk.Entry(card, width=14); self.forge.insert(0, "auto")
         self.forge.configure(state="disabled")
+        row(4, "Forge build", self.forge)
+        self.of_label = ttk.Label(card, text="OptiFine: off — tick Forge to enable",
+                                  style="Muted.TLabel")
+        self.of_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 2))
 
         # ---- imports ----
         imp = ttk.Frame(root, style="Card.TFrame", padding=14)
@@ -83,11 +94,9 @@ class App:
         self.imp_label = ttk.Label(imp, text="", style="Muted.TLabel", wraplength=440)
         self.imp_label.pack(anchor="w")
 
-        # ---- play ----
         self.play_btn = ttk.Button(root, text="▶   PLAY", style="Play.TButton", command=self.play)
         self.play_btn.pack(fill="x", padx=18, pady=14)
 
-        # ---- progress + log ----
         self.status = ttk.Label(root, text="Loading version list…", anchor="w")
         self.status.pack(fill="x", padx=18)
         self.bar = ttk.Progressbar(root, mode="indeterminate", maximum=100)
@@ -121,8 +130,34 @@ class App:
         except Exception as e:
             self.q.put(("stage", f"Couldn't load version list: {e}", None, None))
 
+    # ---------- forge / optifine logic ----------
     def _toggle_forge(self):
-        self.forge.configure(state="normal" if self.forge_on.get() else "disabled")
+        if self.forge_on.get():
+            self.forge.configure(state="normal")
+            self.optifine_ck.configure(state="normal")
+            if not self.optifine_path:
+                self.of_label.config(text="OptiFine: on (no jar picked yet)", foreground=MUTED)
+        else:
+            self.forge.configure(state="disabled")
+            self.optifine_on.set(False)                    # forge off => optifine off
+            self.optifine_ck.configure(state="disabled")
+            self.of_label.config(text="OptiFine: off — tick Forge to enable", foreground=MUTED)
+
+    def _pick_optifine(self):
+        if not self.optifine_on.get() and not self.forge_on.get():
+            # 'pick jar…' button pressed while unticked - just check the box if forge is on
+            if self.forge_on.get(): self.optifine_on.set(True)
+        if self.optifine_on.get():
+            p = filedialog.askopenfilename(title="Pick OptiFine installer jar",
+                                          filetypes=[("OptiFine installer", "*.jar")])
+            if p:
+                self.optifine_path = p
+                self.of_label.config(text=f"OptiFine: {os.path.basename(p)} (as Forge mod)",
+                                     foreground=ACCENT)
+                return
+            self.optifine_on.set(False)
+        self.optifine_path = None
+        self.of_label.config(text="OptiFine: off", foreground=MUTED)
 
     # ---------- imports ----------
     def _import_files(self, kind):
@@ -170,7 +205,7 @@ class App:
                     self.status.config(text="Failed — see log", foreground=DANGER)
                     self.log.config(state="normal")
                     self.log.insert("end", f"ERROR: {data[0]}\n"); self.log.see("end")
-                    self.log.config(state="-disabled") if False else self.log.config(state="disabled")
+                    self.log.config(state="disabled")
         except queue.Empty:
             pass
         self.root.after(100, self._drain)
@@ -184,15 +219,17 @@ class App:
         self.status.config(text="Fetching version list…", foreground=FG)
         core.set_reporter(lambda text, done=None, total=None:
                           self.q.put(("stage", text, done, total)))
-        threading.Thread(target=self._play, args=(vid,), daemon=True).start()
+        # optifine only rides along when forge is ticked AND a jar is picked
+        use_optifine = self.optifine_path if (self.forge_on.get() and self.optifine_on.get()) else None
+        threading.Thread(target=self._play, args=(vid, use_optifine), daemon=True).start()
 
-    def _play(self, vid):
+    def _play(self, vid, optifine):
         try:
             if self.forge_on.get():
                 build = self.forge.get().strip()
                 vid = core.install_forge(vid, build if build not in ("", "auto") else None)
-            self.q.put(("msg", f"Launching: {vid}"))
-            core.launch(vid, self.name.get() or "Blemm", self.ram.get())
+            self.q.put(("msg", f"Launching: {vid}" + (" + OptiFine" if optifine else "")))
+            core.launch(vid, self.name.get() or "Blemm", self.ram.get(), optifine)
             core.set_reporter(None)
             self.q.put(("done", f"Played {vid} ♥"))
         except Exception as e:
