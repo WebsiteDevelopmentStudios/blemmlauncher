@@ -1,200 +1,577 @@
 """BlemmLauncher instances - isolated setups, loaders, Modrinth, export/import."""
-import json, os, shutil, subprocess, sys, tempfile, zipfile, urllib.parse, urllib.request
 
-LAUNCHERS_ROOT = os.environ.get("BLEMM_DIR", os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "minecraft"))
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+LAUNCHERS_ROOT = os.environ.get(
+    "BLEMM_DIR",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "minecraft"
+    )
+)
+
 INSTANCES_DIR = os.path.join(LAUNCHERS_ROOT, "instances")
-SHARED_ASSETS = os.path.join(LAUNCHERS_ROOT, "assets")     # prism-style: assets shared
-SHARED_TOOLS = os.path.join(LAUNCHERS_ROOT, "tools")      # java shared
+SHARED_ASSETS = os.path.join(LAUNCHERS_ROOT, "assets")
+SHARED_TOOLS = os.path.join(LAUNCHERS_ROOT, "tools")
+
+MODRINTH_API = "https://api.modrinth.com/v2"
+
+
+# ============================================================
+# SMALL HELPERS
+# ============================================================
 
 def _fetch_json(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "BlemmLauncher/1.2"})
-    with urllib.request.urlopen(req, timeout=25) as r: return json.load(r)
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "BlemmLauncher/1.3.0"}
+    )
+
+    with urllib.request.urlopen(req, timeout=25) as r:
+        return json.load(r)
+
 
 def _download(url, dest):
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    if os.path.exists(dest): return
-    req = urllib.request.Request(url, headers={"User-Agent": "BlemmLauncher/1.2"})
-    with urllib.request.urlopen(req, timeout=60) as r, open(dest + ".part", "wb") as f:
-        shutil.copyfileobj(r, f)
-    os.replace(dest + ".part", dest)
 
-# ---------- instance basics ----------
+    if os.path.exists(dest):
+        return
+
+    tmp = dest + ".part"
+
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "BlemmLauncher/1.3.0"}
+    )
+
+    with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+        shutil.copyfileobj(r, f)
+
+    os.replace(tmp, dest)
+
+
+# ============================================================
+# INSTANCE BASICS
+# ============================================================
+
 def isafe(name):
     bad = '<>:"/\\|?*'
-    return name and not any(c in bad for c in name) and name not in (".", "..")
+    return bool(name) and not any(c in bad for c in name) and name not in (".", "..")
 
-def instance_dir(name): return os.path.join(INSTANCES_DIR, name)
+
+def instance_dir(name):
+    return os.path.join(INSTANCES_DIR, name)
+
 
 def list_instances():
-    if not os.path.isdir(INSTANCES_DIR): return []
+    if not os.path.isdir(INSTANCES_DIR):
+        return []
+
     out = []
+
     for n in sorted(os.listdir(INSTANCES_DIR)):
-        if os.path.exists(os.path.join(INSTANCES_DIR, n, "blemm.json")):
+        if os.path.exists(
+            os.path.join(INSTANCES_DIR, n, "blemm.json")
+        ):
             out.append(n)
+
     return out
 
+
 def load_cfg(name):
-    with open(os.path.join(instance_dir(name), "blemm.json"), encoding="utf-8") as f:
+    with open(
+        os.path.join(instance_dir(name), "blemm.json"),
+        encoding="utf-8"
+    ) as f:
         return json.load(f)
+
 
 def save_cfg(name, cfg):
     os.makedirs(instance_dir(name), exist_ok=True)
-    with open(os.path.join(instance_dir(name), "blemm.json"), "w", encoding="utf-8") as f:
+
+    with open(
+        os.path.join(instance_dir(name), "blemm.json"),
+        "w",
+        encoding="utf-8"
+    ) as f:
         json.dump(cfg, f, indent=2)
+
 
 def create(name, version, loader=None, ram="4G", username="Blemm", build=None):
     """loader: None | 'forge' | 'fabric' | 'neoforge'."""
-    if not isafe(name): raise RuntimeError(f"bad instance name '{name}'")
-    if name in list_instances(): raise RuntimeError(f"instance '{name}' already exists")
+
+    if not isafe(name):
+        raise RuntimeError("bad instance name '" + str(name) + "'")
+
+    if name in list_instances():
+        raise RuntimeError("instance '" + name + "' already exists")
+
     os.makedirs(instance_dir(name), exist_ok=True)
+
     for sub in ("mods", "resourcepacks", "shaderpacks", "saves"):
-        os.makedirs(os.path.join(instance_dir(name), sub), exist_ok=True)
-    cfg = {"name": name, "version": version, "loader": loader, "loader_build": build,
-           "ram": ram, "username": username}
+        os.makedirs(
+            os.path.join(instance_dir(name), sub),
+            exist_ok=True
+        )
+
+    cfg = {
+        "name": name,
+        "version": version,
+        "loader": loader,
+        "loader_build": build,
+        "ram": ram,
+        "username": username,
+        "optifine": False
+    }
+
     save_cfg(name, cfg)
+
     return cfg
+
 
 def delete(name):
     d = instance_dir(name)
-    if os.path.isdir(d): shutil.rmtree(d)
+
+    if os.path.isdir(d):
+        shutil.rmtree(d)
+
 
 def use(name, core):
-    """Point core's globals at this instance; share assets/java globally."""
+    """Point core at this instance. Everything (mods, libraries,
+    version JSONs, natives) is per-instance; assets and Java runtimes
+    are shared globally so they aren't re-downloaded per instance.
+
+    This MUST stay the only way the GUI pointers get switched, and it
+    goes through core.set_game_dir() so every dependent path updates
+    together - no leaking from the previously selected instance.
+    """
+
     d = instance_dir(name)
-    core.GAME_DIR = d
-    core.ASSETS = SHARED_ASSETS
-    core.TOOLS = SHARED_TOOLS
-    core.LIBS = os.path.join(d, "libraries")
+
+    core.set_game_dir(
+        d,
+        assets_dir=SHARED_ASSETS,
+        tools_dir=SHARED_TOOLS
+    )
+
     return d
 
-# ---------- export / import ----------
+
+# ============================================================
+# EXPORT / IMPORT
+# ============================================================
+
 def export(name, dest_zip):
     d = instance_dir(name)
-    if not os.path.isdir(d): raise RuntimeError(f"no instance '{name}'")
+
+    if not os.path.isdir(d):
+        raise RuntimeError("no instance '" + str(name) + "'")
+
     with zipfile.ZipFile(dest_zip, "w", zipfile.ZIP_DEFLATED) as z:
         for root, _, files in os.walk(d):
-            if os.sep + "libraries" in root or os.sep + "natives" in root: continue
+            if (
+                os.sep + "libraries" in root
+                or os.sep + "natives" in root
+                or os.sep + "log-configs" in root
+                or os.sep + "versions" in root
+            ):
+                continue
+
             for f in files:
+                if f.endswith(".part") or f.endswith(".disabled"):
+                    continue
+
                 p = os.path.join(root, f)
-                z.write(p, os.path.join(name, os.path.relpath(p, d)))
+                z.write(
+                    p,
+                    os.path.join(name, os.path.relpath(p, d))
+                )
+
 
 def import_from_zip(src_zip):
     with tempfile.TemporaryDirectory() as td:
-        with zipfile.ZipFile(src_zip) as z: z.extractall(td)
+        with zipfile.ZipFile(src_zip) as z:
+            z.extractall(td)
+
         for n in os.listdir(td):
-            if os.path.exists(os.path.join(td, n, "blemm.json")):
-                if not isafe(n): raise RuntimeError(f"bad instance name in zip: '{n}'")
+            if os.path.exists(
+                os.path.join(td, n, "blemm.json")
+            ):
+                if not isafe(n):
+                    raise RuntimeError(
+                        "bad instance name in zip: '" + str(n) + "'"
+                    )
+
                 if os.path.exists(instance_dir(n)):
                     i = 1
-                    while os.path.exists(instance_dir(f"{n} ({i})")): i += 1
-                    n = f"{n} ({i})"
-                shutil.move(os.path.join(td, n), instance_dir(n))
+
+                    while os.path.exists(instance_dir(n + " (" + str(i) + ")")):
+                        i += 1
+
+                    n = n + " (" + str(i) + ")"
+
+                shutil.move(
+                    os.path.join(td, n),
+                    instance_dir(n)
+                )
+
                 return n
+
     raise RuntimeError("zip had no instance (missing blemm.json)")
 
-# ---------- desktop shortcut ----------
+
+# ============================================================
+# DESKTOP SHORTCUT
+# ============================================================
+
 def shortcut(name):
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-    bat = os.path.join(desktop, f"Blemm - {name}.bat")
-    exe = sys.executable if sys.executable.lower().endswith("blemmlauncher.exe") \
-          else f'"{os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "run.py")}"'
-    py = f'python' if not sys.executable.lower().endswith("blemmlauncher.exe") else ""
-    with open(bat, "w") as f:
-        f.write(f'@echo off\n{py} {exe} --instance "{name}"\n')
+
+    bat = os.path.join(desktop, "Blemm - " + name + ".bat")
+
+    if getattr(sys, "frozen", False):
+        cmd = '"' + sys.executable + '" --instance "' + name + '"'
+    else:
+        base = os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))
+        )
+
+        runpy = os.path.join(base, "run.py")
+
+        cmd = 'python "' + runpy + '" --instance "' + name + '"'
+
+    with open(bat, "w", encoding="utf-8") as f:
+        f.write("@echo off\n" + cmd + "\n")
+
     return bat
 
-# ---------- loaders ----------
-def _java():
+
+# ============================================================
+# LOADERS
+# ============================================================
+
+def _java(mc_version):
     from . import core
-    return core.java_bin_for("1.20")
+    return core.java_bin_for(mc_version)
+
+
+def _version_installed(core, vid):
+    """True if versions/<vid>/<vid>.json exists for this instance."""
+    p = os.path.join(
+        core.GAME_DIR,
+        "versions",
+        vid,
+        vid + ".json"
+    )
+    return os.path.exists(p)
+
 
 def install_fabric(mc_version):
-    inst = _fetch_json("https://meta.fabricmc.net/v2/versions/installer")[0]
+    """Install Fabric for this instance. RETURNS the installed version
+    id (like 'fabric-loader-0.16.x-1.21.1') so the caller can launch
+    the Fabric version instead of vanilla.
+    """
+
+    from . import core
+
+    # Fast path: already installed for this instance?
+    existing = glob.glob(
+        os.path.join(
+            core.GAME_DIR,
+            "versions",
+            "fabric-loader-*-" + mc_version
+        )
+    )
+
+    for p in sorted(existing, reverse=True):
+        vid = os.path.basename(p)
+
+        if os.path.exists(
+            os.path.join(p, vid + ".json")
+        ):
+            return vid
+
+    try:
+        installers = _fetch_json(
+            "https://meta.fabricmc.net/v2/versions/installer"
+        )
+    except Exception as e:
+        raise RuntimeError(
+            "couldn't fetch the Fabric installer list: " + str(e)
+        ) from e
+
+    if not installers:
+        raise RuntimeError("Fabric returned no installers")
+
+    inst = installers[0]
+
+    try:
+        loaders = _fetch_json(
+            "https://meta.fabricmc.net/v2/versions/loader/" + mc_version
+        )
+    except Exception as e:
+        raise RuntimeError(
+            "Fabric doesn't seem to support Minecraft "
+            + mc_version + ": " + str(e)
+        ) from e
+
+    if not loaders:
+        raise RuntimeError(
+            "no Fabric loader found for Minecraft " + mc_version
+        )
+
+    loader_ver = loaders[0]["loader"]["version"]
+
     with tempfile.TemporaryDirectory() as td:
-        ij = os.path.join(td, "fi.jar"); _download(inst["url"], ij)
-        from . import core
-        d = core.GAME_DIR
-        r = subprocess.run([_java(), "-jar", ij, "client", "-dir", d,
-                            "-mcversion", mc_version, "-nogui"], capture_output=True)
+        ij = os.path.join(td, "fabric-installer.jar")
+        _download(inst["url"], ij)
+
+        r = subprocess.run(
+            [
+                _java(mc_version),
+                "-jar", ij,
+                "client",
+                "-dir", core.GAME_DIR,
+                "-mcversion", mc_version,
+                "-loader", loader_ver,
+                "-nogui"
+            ],
+            capture_output=True,
+            timeout=900
+        )
+
         if r.returncode != 0:
-            raise RuntimeError("fabric install failed: " + r.stderr.decode(errors="replace")[:400])
-    return _fetch_json(f"https://meta.fabricmc.net/v2/versions/loader/{mc_version}")[0]["loader"]["version"]
+            outp = ((r.stderr or b"") + (r.stdout or b"")).decode(
+                errors="replace"
+            )
+
+            raise RuntimeError(
+                "Fabric install failed (exit code "
+                + str(r.returncode) + "): " + outp[-600:]
+            )
+
+    vid = "fabric-loader-" + loader_ver + "-" + mc_version
+
+    if not _version_installed(core, vid):
+        raise RuntimeError(
+            "Fabric installer finished but version '" + vid
+            + "' was not created - the installer output was unclear."
+        )
+
+    return vid
+
+
+def _neoforge_series(mc_version):
+    """Compute the NeoForge version series from a Minecraft version.
+
+    1.20.1 -> '20.1', 1.21.4 -> '21.4', 1.21 -> '21.0' etc. Nothing
+    game-version specific is hard-coded; if NeoForge doesn't produce
+    builds for this series the caller reports it usefully.
+    """
+
+    m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?$", str(mc_version))
+
+    if not m:
+        return None
+
+    minor = m.group(2)
+    patch = m.group(3) or "0"
+
+    return minor + "." + patch
+
 
 def install_neoforge(mc_version, build=None):
-    vers = _fetch_json("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")
+    """Install NeoForge for this instance. RETURNS the installed version
+    id (like 'neoforge-21.1.95') so the caller launches the modded
+    version, not vanilla.
+    """
+
+    from . import core
+
+    # Fast path: known build already installed?
+    if build and _version_installed(core, "neoforge-" + str(build)):
+        return "neoforge-" + str(build)
+
+    try:
+        vers = _fetch_json(
+            "https://maven.neoforged.net/api/maven/versions/releases/"
+            "net/neoforged/neoforge"
+        )
+    except Exception as e:
+        raise RuntimeError(
+            "couldn't fetch the NeoForge version list: " + str(e)
+        ) from e
+
     if build is None:
-        import re
-        ok = [v.replace(".", "", 2)[:2] for v in vers]  # crude filter below instead
-        build = None
-        want = {"1.21.1": "21.1", "1.21": "21.0", "1.20.6": "20.6", "1.20.5": "20.5",
-                "1.20.4": "20.4", "1.20.3": "20.3", "1.20.2": "20.2", "1.20.1": "20.1",
-                "1.20": "20", "1.19.5": "19.5", "1.19.4": "19.4"}
-        pref = want.get(mc_version)
-        cands = [v for v in vers if not v.endswith("-beta")]
-        if pref:
-            cands = sorted([v for v in cands if v.startswith(pref)],
-                           key=lambda v: [int(x) for x in v.split(".") if x.isdigit()], reverse=True)
-            if cands: build = cands[0]
-        if build is None:
-            raise RuntimeError(f"no NeoForge build found for {mc_version} (try Forge/Fabric)")
+        series = _neoforge_series(mc_version)
+
+        if series is None:
+            raise RuntimeError(
+                "can't map Minecraft '" + str(mc_version)
+                + "' to a NeoForge version."
+            )
+
+        def key(v):
+            return [int(x) for x in v.split(".") if x.isdigit()]
+
+        cands = [
+            v for v in vers
+            if v.startswith(series + ".")
+            and "beta" not in v.lower()
+        ]
+
+        cands = sorted(cands, key=key, reverse=True)
+
+        if not cands:
+            raise RuntimeError(
+                "no NeoForge build found for Minecraft " + mc_version
+                + " (series " + series + "). "
+                "Use Forge or Fabric for this version instead."
+            )
+
+        build = cands[0]
+
+    # Fast path once more with the resolved build.
+    if _version_installed(core, "neoforge-" + str(build)):
+        return "neoforge-" + str(build)
+
     with tempfile.TemporaryDirectory() as td:
-        ij = os.path.join(td, "nf.jar")
-        _download(f"https://maven.neoforged.net/releases/net/neoforged/neoforge/{build}/"
-                  f"neoforge-{build}-installer.jar", ij)
-        from . import core
-        r = subprocess.run([_java(), "-jar", ij, "--installClient"],
-                            cwd=core.GAME_DIR, capture_output=True)
+        ij = os.path.join(td, "neoforge-installer.jar")
+
+        try:
+            _download(
+                "https://maven.neoforged.net/releases/"
+                "net/neoforged/neoforge/" + str(build) + "/"
+                "neoforge-" + str(build) + "-installer.jar",
+                ij
+            )
+        except Exception as e:
+            raise RuntimeError(
+                "couldn't download the NeoForge "
+                + str(build) + " installer: " + str(e)
+            ) from e
+
+        r = subprocess.run(
+            [
+                _java(mc_version),
+                "-jar", ij,
+                "--installClient"
+            ],
+            cwd=core.GAME_DIR,
+            capture_output=True,
+            timeout=1800
+        )
+
         if r.returncode != 0:
-            raise RuntimeError("neoforge install failed: " + r.stderr.decode(errors="replace")[:400])
-    return build
+            outp = ((r.stderr or b"") + (r.stdout or b"")).decode(
+                errors="replace"
+            )
+
+            raise RuntimeError(
+                "NeoForge install failed (exit code "
+                + str(r.returncode) + "): " + outp[-600:]
+            )
+
+    vid = "neoforge-" + str(build)
+
+    if not _version_installed(core, vid):
+        raise RuntimeError(
+            "NeoForge installer finished but version '" + vid
+            + "' was not created."
+        )
+
+    return vid
+
 
 def install_loader(loader, mc_version, build=None):
     from . import core
-    if loader == "forge":
-        return core.install_forge(mc_version, build)            # returns full version id
-    if loader == "fabric":  return install_fabric(mc_version)   # returns loader version
-    if loader == "neoforge": return install_neoforge(mc_version, build)
-    raise RuntimeError(f"unknown loader {loader}")
 
-# ---------- Modrinth ----------
-MODRINTH_API = "https://api.modrinth.com/v2"
+    if loader == "forge":
+        return core.install_forge(mc_version, build)
+
+    if loader == "fabric":
+        return install_fabric(mc_version)
+
+    if loader == "neoforge":
+        return install_neoforge(mc_version, build)
+
+    raise RuntimeError("unknown loader " + str(loader))
+
+
+# ============================================================
+# MODRINTH
+# ============================================================
 
 def _modrinth_json(path, params=None):
-    """Fetch JSON from Modrinth with proper URL encoding and useful errors."""
     url = MODRINTH_API + path
+
     if params:
         url += "?" + urllib.parse.urlencode(params)
 
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "BlemmLauncher/1.3.0",
-        "Accept": "application/json",
-    })
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "BlemmLauncher/1.3.0",
+            "Accept": "application/json",
+        }
+    )
 
     try:
         with urllib.request.urlopen(req, timeout=25) as r:
             return json.load(r)
+
     except urllib.error.HTTPError as e:
         try:
             body = e.read().decode("utf-8", errors="replace")
         except Exception:
             body = ""
+
         raise RuntimeError(
-            f"Modrinth API error (HTTP {e.code}): {body[:500]}"
+            "Modrinth API error (HTTP " + str(e.code) + "): "
+            + body[:500]
         ) from e
+
     except Exception as e:
-        raise RuntimeError(f"Modrinth API request failed: {e}") from e
+        raise RuntimeError(
+            "Modrinth API request failed: " + str(e)
+        ) from e
 
 
-def modrinth_search(query, mc_version, loader=None):
-    """Search Modrinth for projects compatible with a Minecraft version."""
-    # Modrinth facets are JSON arrays. Build the JSON first, then let
-    # urlencode() correctly escape brackets, quotes, spaces, etc.
-    facets = [[f"versions:{mc_version}"]]
+def _modrinth_project_type(ptype):
+    return {
+        "mod": "mod",
+        "shader": "shader",
+        "resourcepack": "resourcepack"
+    }.get(ptype, "mod")
 
-    if loader:
-        loader = loader.lower().strip()
-        facets.append([f"categories:{loader}"])
+
+def modrinth_search(query, mc_version, loader=None, project_type="mod"):
+    """Search Modrinth for projects compatible with a Minecraft version.
+
+    project_type: 'mod' | 'shader' | 'resourcepack'.
+    """
+
+    pt = _modrinth_project_type(project_type)
+
+    facets = [
+        ["project_type:" + pt],
+        ["versions:" + str(mc_version)]
+    ]
+
+    if pt == "mod" and loader:
+        facets.append(["categories:" + str(loader).lower().strip()])
 
     data = _modrinth_json("/search", {
         "limit": "12",
@@ -203,6 +580,7 @@ def modrinth_search(query, mc_version, loader=None):
     })
 
     results = []
+
     for h in data.get("hits", []):
         results.append({
             "title": h.get("title", "Unknown"),
@@ -216,27 +594,44 @@ def modrinth_search(query, mc_version, loader=None):
     return results
 
 
-def modrinth_install(project_id, mc_version, loader=None):
-    """Install the first compatible Modrinth file."""
+def modrinth_install(project_id, mc_version, loader=None, project_type="mod"):
+    """Download the best compatible file into the CURRENT instance.
+
+    The destination depends on the project type: mods/ for mods,
+    shaderpacks/ for shaders, resourcepacks/ for resource packs
+    (which are also auto-enabled). core.GAME_DIR must already point
+    at the right instance.
+    """
+
+    from . import core
+
+    pt = _modrinth_project_type(project_type)
+
     params = {
-        "game_versions": json.dumps([mc_version], separators=(",", ":")),
+        "game_versions": json.dumps([str(mc_version)], separators=(",", ":")),
     }
 
-    if loader:
+    # Loader filtering only makes sense for mods; shaders/packs list
+    # 'iris'/'optifine'/'minecraft' as loaders, so don't filter there.
+
+    if pt == "mod" and loader:
         params["loaders"] = json.dumps(
-            [loader.lower().strip()],
+            [str(loader).lower().strip()],
             separators=(",", ":")
         )
 
     versions = _modrinth_json(
-        f"/project/{urllib.parse.quote(project_id, safe='')}/version",
+        "/project/"
+        + urllib.parse.quote(project_id, safe="")
+        + "/version",
         params
     )
 
     if not versions:
         raise RuntimeError(
-            f"No Modrinth version found for {project_id} on Minecraft "
-            f"{mc_version}" + (f" with {loader}" if loader else "")
+            "No Modrinth version found for this project on Minecraft "
+            + str(mc_version)
+            + ((" with " + str(loader)) if loader else "")
         )
 
     ver = versions[0]
@@ -244,10 +639,10 @@ def modrinth_install(project_id, mc_version, loader=None):
 
     if not files:
         raise RuntimeError(
-            f"Modrinth version {ver.get('id', '?')} has no downloadable files"
+            "Modrinth version " + str(ver.get("id", "?"))
+            + " has no downloadable files"
         )
 
-    # Prefer the file Modrinth marks as primary.
     f = next((x for x in files if x.get("primary")), files[0])
 
     url = f.get("url")
@@ -256,7 +651,24 @@ def modrinth_install(project_id, mc_version, loader=None):
     if not url or not filename:
         raise RuntimeError("Modrinth returned an invalid file entry")
 
-    from . import core
-    dest = os.path.join(core.GAME_DIR, "mods", filename)
+    if pt == "shader":
+        folder = "shaderpacks"
+    elif pt == "resourcepack":
+        folder = "resourcepacks"
+    else:
+        folder = "mods"
+
+    dest = os.path.join(core.GAME_DIR, folder, filename)
+
     _download(url, dest)
+
+    if pt == "resourcepack":
+        try:
+            core.enable_resourcepack(filename)
+        except Exception as e:
+            raise RuntimeError(
+                "Resource pack downloaded, but it could not be "
+                "enabled automatically: " + str(e)
+            ) from e
+
     return filename
