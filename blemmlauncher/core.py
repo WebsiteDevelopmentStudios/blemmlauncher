@@ -1,13 +1,17 @@
 """BlemmLauncher core - versions, Forge, OptiFine, mods, packs, Java, progress."""
 import hashlib, json, os, platform, shutil, subprocess, sys, tempfile, urllib.request, uuid, zipfile
 
-LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.1.0"
+LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.1.1"
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 LIB_BASE = "https://libraries.minecraft.net/"
 RESOURCE_BASE = "https://resources.download.minecraft.net/"
 FORGE_PROMOS = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
 FORGE_MAVEN = "https://maven.minecraftforge.net"
 ADOPTIUM_API = "https://api.adoptium.net/v3/binary/latest/{major}/ga/windows/x64/jdk/hotspot/normal/eclipse"
+
+# Browser-style UA: Mojang's piston-data CDN 403s unfamiliar/robotic user agents.
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              f"{LAUNCHER_NAME}/{LAUNCHER_VERSION} (contact: local)")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GAME_DIR = os.environ.get("BLEMM_DIR", os.path.join(ROOT, "minecraft"))
@@ -37,17 +41,28 @@ def file_sha1(p):
         for chunk in iter(lambda: f.read(1 << 16), b""): h.update(chunk)
     return h.hexdigest()
 
+def _open(url):
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    return urllib.request.urlopen(req, timeout=60)
+
 def download(url, dest, sha1=None):
     dest = os.path.normpath(dest)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if os.path.exists(dest) and (sha1 is None or file_sha1(dest) == sha1): return
     tmp = dest + ".part"
-    req = urllib.request.Request(url, headers={"User-Agent": f"{LAUNCHER_NAME}/{LAUNCHER_VERSION}"})
-    with urllib.request.urlopen(req) as r, open(tmp, "wb") as f: shutil.copyfileobj(r, f)
+    for attempt in (1, 2, 3):
+        try:
+            with _open(url) as r, open(tmp, "wb") as f: shutil.copyfileobj(r, f)
+            break
+        except Exception as e:
+            if attempt == 3:
+                # say WHICH url failed - no more mystery errors
+                raise RuntimeError(f"download failed: {url} -> {e}") from e
+            import time; time.sleep(1 * attempt)
     os.replace(tmp, dest)
 
 def fetch_json(url):
-    with urllib.request.urlopen(url) as r: return json.load(r)
+    with _open(url) as r: return json.load(r)
 
 def maven_path(name):
     g, aid, ver, *ext = name.split(":")
@@ -104,6 +119,7 @@ def load_version_json(vid, m):
     path = os.path.join(GAME_DIR, "versions", vid, vid + ".json")
     if not os.path.exists(path):
         vurl = next(v["url"] for v in m["versions"] if v["id"] == vid)
+        report("Downloading version info...")
         download(vurl, path)
     vj = json.load(open(path, encoding="utf-8"))
     if "inheritsFrom" in vj:
@@ -159,10 +175,12 @@ def install_libraries(vj):
         if rp in seen or not rp: continue
         seen.add(rp)
         jar = os.path.join(LIBS, rp)
-        url = (art.get("url") if art else None) or (LIB_BASE + rp)
-        if url:
-            try: download(url, jar, art.get("sha1") if art else None)
-            except Exception: download(f"{FORGE_MAVEN}/{rp}", jar)
+        url = (art.get("url") if art else None) or (FORGE_MAVEN + "/" + rp)
+        try:
+            download(url, jar, art.get("sha1") if art else None)
+        except Exception:
+            if url.startswith(LIB_BASE):
+                download(FORGE_MAVEN + "/" + rp, jar)   # forge mirrors many mojang libs
         classpath.append(jar)
         classifier = lib.get("natives", {}).get(os_name())
         if classifier:
@@ -195,6 +213,8 @@ def install_assets(vj):
 
 # ---------- OptiFine ----------
 def install_optifine(installer_jar, with_forge=False):
+    """Extracts the real OptiFine jar from its installer (MultiMC trick).
+    with_forge=True puts it in mods/ as a Forge mod."""
     vid_dir = os.path.join(GAME_DIR, "mods" if with_forge else "optifine")
     os.makedirs(vid_dir, exist_ok=True)
     out = os.path.join(vid_dir, os.path.basename(installer_jar).replace("_installer", ""))
@@ -299,6 +319,16 @@ def launch(version_id, username="Blemm", ram="2G", optifine=None):
         ["-Djava.library.path=${natives_directory}",
          "-Dminecraft.launcher.brand=${launcher_name}",
          "-Dminecraft.launcher.version=${launcher_version}", "-cp", "${classpath}"]
+
+    # ---- OptiFine policy: Forge-only ----
+    forge_active = "-forge-" in vid
+    if optifine:
+        if forge_active:
+            of_jar = install_optifine(optifine, with_forge=True)   # goes in mods/
+            log(f"OptiFine enabled as Forge mod: {of_jar}")
+        else:
+            log("OptiFine selected but Forge is OFF - skipping OptiFine.")
+
     subs = {
         "${auth_player_name}": username,
         "${auth_uuid}": str(uuid.uuid3(uuid.NAMESPACE_OID, "offline:" + username)),
