@@ -1,1042 +1,518 @@
+```python
 import os
 import threading
 import queue
-
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext, messagebox
 
 from . import core, instances
 
-BG, PANEL, FIELD = "#1e1f24", "#272930", "#2f323b"
-FG, MUTED, ACCENT, DANGER = "#e8e9ee", "#8b8fa3", "#4ade80", "#f87171"
+
+BG = "#1e1f24"
+PANEL = "#272930"
+FIELD = "#2f323b"
+FG = "#e8e9ee"
+MUTED = "#8b8fa3"
+ACCENT = "#4ade80"
+DANGER = "#f87171"
+
 
 def style_dark(root):
-ttk.Style().theme_use("clam")
+    style = ttk.Style()
 
-```
-s = ttk.Style()
+    try:
+        style.theme_use("clam")
+    except Exception:
+        pass
 
-s.configure(
-    ".",
-    background=BG,
-    foreground=FG,
-    fieldbackground=FIELD,
-    bordercolor=PANEL,
-    lightcolor=PANEL,
-    darkcolor=PANEL,
-    troughcolor=FIELD,
-    arrowcolor=MUTED,
-)
-
-for n, bg in [
-    ("TFrame", BG),
-    ("Card.TFrame", PANEL),
-]:
-    s.configure(
-        n,
-        background=bg,
+    style.configure(
+        ".",
+        background=BG,
+        foreground=FG,
+        fieldbackground=FIELD,
+        bordercolor=PANEL,
+        lightcolor=PANEL,
+        darkcolor=PANEL,
+        troughcolor=FIELD,
+        arrowcolor=MUTED,
     )
 
-s.configure(
-    "TLabel",
-    background=BG,
-    foreground=FG,
-)
+    style.configure("TFrame", background=BG)
+    style.configure("Card.TFrame", background=PANEL)
 
-s.configure(
-    "Muted.TLabel",
-    background=BG,
-    foreground=MUTED,
-)
+    style.configure(
+        "TLabel",
+        background=BG,
+        foreground=FG,
+    )
 
-s.configure(
-    "MutedP.TLabel",
-    background=PANEL,
-    foreground=MUTED,
-)
+    style.configure(
+        "Muted.TLabel",
+        background=BG,
+        foreground=MUTED,
+    )
 
-s.configure(
-    "Title.TLabel",
-    background=BG,
-    foreground=ACCENT,
-    font=("Segoe UI", 18, "bold"),
-)
+    style.configure(
+        "MutedP.TLabel",
+        background=PANEL,
+        foreground=MUTED,
+    )
 
-s.configure(
-    "TEntry",
-    foreground=FG,
-    insertcolor=FG,
-    padding=4,
-)
+    style.configure(
+        "Title.TLabel",
+        background=BG,
+        foreground=ACCENT,
+        font=("Segoe UI", 18, "bold"),
+    )
 
-s.configure(
-    "TCombobox",
-    foreground=FG,
-    padding=4,
-)
+    style.configure(
+        "TEntry",
+        foreground=FG,
+        insertcolor=FG,
+        padding=4,
+    )
 
-s.map(
-    "TCombobox",
-    fieldbackground=[
-        ("readonly", FIELD)
-    ],
-)
+    style.configure(
+        "TCombobox",
+        foreground=FG,
+        padding=4,
+    )
 
-s.configure(
-    "Inst.TButton",
-    background=FIELD,
-    foreground=FG,
-    padding=6,
-    width=13,
-)
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", FIELD)],
+    )
 
-s.map(
-    "Inst.TButton",
-    background=[
-        ("active", "#3a3e49")
-    ],
-)
+    style.configure(
+        "Inst.TButton",
+        background=FIELD,
+        foreground=FG,
+        padding=6,
+        width=13,
+    )
 
-s.configure(
-    "Play.TButton",
-    background=ACCENT,
-    foreground="#10240f",
-    font=("Segoe UI", 12, "bold"),
-    padding=(30, 10),
-)
+    style.map(
+        "Inst.TButton",
+        background=[("active", "#3a3e49")],
+    )
 
-s.map(
-    "Play.TButton",
-    background=[
-        ("active", "#6ce89a"),
-        ("disabled", "#39543f"),
-    ],
-)
+    style.configure(
+        "Play.TButton",
+        background=ACCENT,
+        foreground="#10240f",
+        font=("Segoe UI", 12, "bold"),
+        padding=(30, 10),
+    )
 
-s.configure(
-    "TButton",
-    background=FIELD,
-    foreground=FG,
-    padding=6,
-)
+    style.map(
+        "Play.TButton",
+        background=[
+            ("active", "#6ce89a"),
+            ("disabled", "#39543f"),
+        ],
+    )
 
-s.map(
-    "TButton",
-    background=[
-        ("active", "#3a3e49")
-    ],
-)
+    style.configure(
+        "TButton",
+        background=FIELD,
+        foreground=FG,
+        padding=6,
+    )
 
-s.configure(
-    "TCheckbutton",
-    background=PANEL,
-    foreground=FG,
-)
+    style.map(
+        "TButton",
+        background=[("active", "#3a3e49")],
+    )
 
-s.configure(
-    "Horizontal.TProgressbar",
-    background=ACCENT,
-    troughcolor=FIELD,
-    thickness=10,
-)
+    style.configure(
+        "TCheckbutton",
+        background=PANEL,
+        foreground=FG,
+    )
 
-root.configure(bg=BG)
-```
+    style.configure(
+        "Horizontal.TProgressbar",
+        background=ACCENT,
+        troughcolor=FIELD,
+        thickness=10,
+    )
+
+    root.configure(bg=BG)
+
 
 class App:
-def **init**(self, root):
-self.root = root
+    def __init__(self, root):
+        self.root = root
 
-```
-    root.title("BlemmLauncher")
-    root.geometry("860x600")
-    root.minsize(760, 540)
+        root.title("BlemmLauncher")
+        root.geometry("860x600")
+        root.minsize(760, 540)
 
-    style_dark(root)
+        style_dark(root)
 
-    self.q = queue.Queue()
-    self.sel = None
-    self.version_map = {}
+        self.q = queue.Queue()
+        self.sel = None
+        self.version_map = {}
 
-    head = ttk.Frame(root)
-    head.pack(
-        fill="x",
-        padx=14,
-        pady=(10, 2),
-    )
+        # ------------------------------------------------------------
+        # Header
+        # ------------------------------------------------------------
 
-    ttk.Label(
-        head,
-        text="◈ BlemmLauncher",
-        style="Title.TLabel",
-    ).pack(side="left")
+        head = ttk.Frame(root)
+        head.pack(fill="x", padx=14, pady=(10, 2))
 
-    ttk.Label(
-        head,
-        text="instances · loaders · modrinth · import/export",
-        style="Muted.TLabel",
-    ).pack(
-        side="left",
-        padx=10,
-        pady=(10, 0),
-    )
+        ttk.Label(
+            head,
+            text="◈ BlemmLauncher",
+            style="Title.TLabel",
+        ).pack(side="left")
 
-    body = ttk.Frame(root)
-    body.pack(
-        fill="both",
-        expand=True,
-        padx=14,
-        pady=8,
-    )
+        ttk.Label(
+            head,
+            text="instances · loaders · modrinth · import/export",
+            style="Muted.TLabel",
+        ).pack(side="left", padx=10, pady=(10, 0))
 
-    body.columnconfigure(
-        1,
-        weight=1,
-    )
+        # ------------------------------------------------------------
+        # Main body
+        # ------------------------------------------------------------
 
-    body.rowconfigure(
-        0,
-        weight=1,
-    )
+        body = ttk.Frame(root)
+        body.pack(fill="both", expand=True, padx=14, pady=8)
 
-    # ---------- left: instance list ----------
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(0, weight=1)
 
-    left = ttk.Frame(
-        body,
-        style="Card.TFrame",
-        padding=8,
-    )
+        # ------------------------------------------------------------
+        # Instance list
+        # ------------------------------------------------------------
 
-    left.grid(
-        row=0,
-        column=0,
-        sticky="ns",
-        padx=(0, 10),
-    )
+        left = ttk.Frame(
+            body,
+            style="Card.TFrame",
+            padding=8,
+        )
 
-    self.ilist = tk.Listbox(
-        left,
-        width=26,
-        bg=FIELD,
-        fg=FG,
-        relief="flat",
-        highlightthickness=0,
-        selectbackground=ACCENT,
-        selectforeground="#10240f",
-        font=("Segoe UI", 11),
-    )
+        left.grid(
+            row=0,
+            column=0,
+            sticky="ns",
+            padx=(0, 10),
+        )
 
-    self.ilist.pack(fill="y")
+        self.ilist = tk.Listbox(
+            left,
+            width=26,
+            bg=FIELD,
+            fg=FG,
+            relief="flat",
+            highlightthickness=0,
+            selectbackground=ACCENT,
+            selectforeground="#10240f",
+            font=("Segoe UI", 11),
+        )
 
-    self.ilist.bind(
-        "<<ListboxSelect>>",
-        self._sel_ev,
-    )
+        self.ilist.pack(fill="y")
+        self.ilist.bind("<<ListboxSelect>>", self._sel_ev)
 
-    bb = ttk.Frame(
-        left,
-        style="Card.TFrame",
-    )
+        bb = ttk.Frame(
+            left,
+            style="Card.TFrame",
+        )
 
-    bb.pack(
-        fill="x",
-        pady=(8, 0),
-    )
+        bb.pack(
+            fill="x",
+            pady=(8, 0),
+        )
 
-    for i, (t, c) in enumerate(
-        [
+        buttons = [
             ("＋ New", self.new_inst),
             ("⭳ Import", self.import_inst),
             ("⭱ Export", self.export_inst),
             ("✂ Shortcut", self.make_shortcut),
             ("🗑 Delete", self.del_inst),
         ]
-    ):
-        ttk.Button(
-            bb,
-            text=t,
-            style="Inst.TButton",
-            command=c,
-        ).grid(
-            row=i // 2,
-            column=i % 2,
-            sticky="we",
-            pady=2,
-            padx=2,
+
+        for i, (text, command) in enumerate(buttons):
+            ttk.Button(
+                bb,
+                text=text,
+                style="Inst.TButton",
+                command=command,
+            ).grid(
+                row=i // 2,
+                column=i % 2,
+                sticky="we",
+                pady=2,
+                padx=2,
+            )
+
+        bb.columnconfigure(0, weight=1)
+        bb.columnconfigure(1, weight=1)
+
+        # ------------------------------------------------------------
+        # Right side
+        # ------------------------------------------------------------
+
+        right = ttk.Frame(
+            body,
+            style="Card.TFrame",
+            padding=16,
         )
 
-    bb.columnconfigure(
-        0,
-        weight=1,
-    )
-
-    bb.columnconfigure(
-        1,
-        weight=1,
-    )
-
-    # ---------- right: selected instance ----------
-
-    right = ttk.Frame(
-        body,
-        style="Card.TFrame",
-        padding=16,
-    )
-
-    right.grid(
-        row=0,
-        column=1,
-        sticky="nsew",
-    )
-
-    right.columnconfigure(
-        1,
-        weight=1,
-    )
-
-    self.i_title = ttk.Label(
-        right,
-        text="pick or create an instance →",
-        style="Title.TLabel",
-    )
-
-    self.i_title.grid(
-        row=0,
-        column=0,
-        columnspan=2,
-        sticky="w",
-        pady=(0, 6),
-    )
-
-    self.i_info = ttk.Label(
-        right,
-        text="",
-        style="MutedP.TLabel",
-        justify="left",
-        anchor="w",
-    )
-
-    self.i_info.grid(
-        row=1,
-        column=0,
-        columnspan=2,
-        sticky="w",
-        pady=(0, 8),
-    )
-
-    settings = ttk.Frame(
-        right,
-        style="Card.TFrame",
-    )
-
-    settings.grid(
-        row=2,
-        column=0,
-        columnspan=2,
-        sticky="w",
-    )
-
-    ttk.Label(
-        settings,
-        text="Username:",
-        style="MutedP.TLabel",
-    ).pack(side="left")
-
-    self._uname = tk.StringVar(
-        value="Blemm"
-    )
-
-    ttk.Entry(
-        settings,
-        textvariable=self._uname,
-        width=16,
-    ).pack(
-        side="left",
-        padx=(6, 14),
-    )
-
-    ttk.Label(
-        settings,
-        text="RAM:",
-        style="MutedP.TLabel",
-    ).pack(side="left")
-
-    self._ram = tk.StringVar(
-        value="4G"
-    )
-
-    ttk.Combobox(
-        settings,
-        textvariable=self._ram,
-        values=[
-            "2G",
-            "4G",
-            "6G",
-            "8G",
-        ],
-        width=6,
-        state="readonly",
-    ).pack(
-        side="left",
-        padx=6,
-    )
-
-    # ---------- OptiFine ----------
-
-    self._optifine = tk.BooleanVar(
-        value=False
-    )
-
-    self.optifine_check = ttk.Checkbutton(
-        settings,
-        text="OptiFine",
-        variable=self._optifine,
-        command=self._save_optifine_setting,
-    )
-
-    self.optifine_check.pack(
-        side="left",
-        padx=(14, 0),
-    )
-
-    ttk.Button(
-        right,
-        text="⚙ Install OptiFine",
-        command=self.install_optifine,
-    ).grid(
-        row=3,
-        column=0,
-        sticky="w",
-        pady=(10, 0),
-    )
-
-    ttk.Button(
-        right,
-        text="📁 Install OptiFine manually",
-        command=self.install_optifine_manual,
-    ).grid(
-        row=3,
-        column=1,
-        sticky="w",
-        pady=(10, 0),
-        padx=(8, 0),
-    )
-
-    self.optifine_status = ttk.Label(
-        right,
-        text="",
-        style="MutedP.TLabel",
-    )
-
-    self.optifine_status.grid(
-        row=4,
-        column=0,
-        columnspan=2,
-        sticky="w",
-        pady=(4, 0),
-    )
-
-    # ---------- play ----------
-
-    self.play_btn = ttk.Button(
-        right,
-        text="▶   PLAY",
-        style="Play.TButton",
-        command=self.play,
-        state="disabled",
-    )
-
-    self.play_btn.grid(
-        row=5,
-        column=0,
-        columnspan=2,
-        sticky="we",
-        pady=(12, 6),
-    )
-
-    ttk.Button(
-        right,
-        text="🔎 Browse & install (Modrinth) — mods / shaders / packs",
-        command=self.browse_mods,
-    ).grid(
-        row=6,
-        column=0,
-        columnspan=2,
-        sticky="w",
-    )
-
-    ttk.Button(
-        right,
-        text="＋ add files… (Ctrl+click several: mods, packs, shaders)",
-        command=self.add_file,
-    ).grid(
-        row=7,
-        column=0,
-        columnspan=2,
-        sticky="w",
-        pady=(6, 0),
-    )
-
-    # ---------- status + log ----------
-
-    self.status = ttk.Label(
-        root,
-        text="Loading version list…",
-        anchor="w",
-    )
-
-    self.status.pack(
-        fill="x",
-        padx=14,
-    )
-
-    self.bar = ttk.Progressbar(
-        root,
-        mode="indeterminate",
-    )
-
-    self.bar.pack(
-        fill="x",
-        padx=14,
-        pady=(2, 6),
-    )
-
-    logcard = ttk.Frame(
-        root,
-        style="Card.TFrame",
-        padding=6,
-    )
-
-    logcard.pack(
-        fill="both",
-        expand=True,
-        padx=14,
-        pady=(0, 10),
-    )
-
-    self.log = scrolledtext.ScrolledText(
-        logcard,
-        height=6,
-        state="disabled",
-        font=("Consolas", 9),
-        bg=FIELD,
-        fg=FG,
-        insertbackground=FG,
-        relief="flat",
-    )
-
-    self.log.pack(
-        fill="both",
-        expand=True,
-    )
-
-    self.root.after(
-        100,
-        self._drain,
-    )
-
-    threading.Thread(
-        target=self._load_versions,
-        daemon=True,
-    ).start()
-
-    self._refresh_list()
-
-# ---------- version list ----------
-
-def _load_versions(self):
-    try:
-        versions, latest, _ = core.list_versions()
-
-        def sk(v):
-            try:
-                return [
-                    int(x)
-                    for x in v.split(".")
-                    if x.isdigit()
-                ]
-            except Exception:
-                return [-1]
-
-        chosen = sorted(
-            [
-                v
-                for v in versions
-                if sk(v) >= [1, 12, 2]
-                and "-" not in v
-                and not v.startswith(
-                    ("w", "pre", "rc")
-                )
-            ],
-            key=sk,
-            reverse=True,
-        )
-
-        self.q.put(
-            ("versions", chosen)
-        )
-
-    except Exception as e:
-        self.q.put(
-            (
-                "error",
-                f"version list failed: {e}",
-            )
-        )
-
-# ---------- instance list ----------
-
-def _refresh_list(self):
-    self.ilist.delete(
-        0,
-        "end",
-    )
-
-    for n in instances.list_instances():
-        self.ilist.insert(
-            "end",
-            n,
-        )
-
-    self.sel = None
-
-    self._optifine.set(False)
-
-    self.play_btn.config(
-        state="disabled"
-    )
-
-def _sel_ev(self, _=None):
-    sel = self.ilist.curselection()
-
-    if not sel:
-        return
-
-    name = self.ilist.get(
-        sel[0]
-    )
-
-    cfg = instances.load_cfg(
-        name
-    )
-
-    self.sel = name
-    self.version = cfg["version"]
-    self.loader = cfg.get("loader")
-
-    self._uname.set(
-        cfg.get(
-            "username",
-            "Blemm",
-        )
-    )
-
-    self._ram.set(
-        cfg.get(
-            "ram",
-            "4G",
-        )
-    )
-
-    self._optifine.set(
-        bool(
-            cfg.get(
-                "optifine",
-                False,
-            )
-        )
-    )
-
-    self.i_title.config(
-        text=name
-    )
-
-    self.i_info.config(
-        text=(
-            f"version: {cfg['version']}    "
-            f"loader: {cfg.get('loader') or 'vanilla'}\n"
-            f"ram: {cfg.get('ram')}    "
-            f"mods: {self._count_mods(name)}"
-        )
-    )
-
-    self.play_btn.config(
-        state="normal"
-    )
-
-    self._update_optifine_status()
-
-def _count_mods(self, name):
-    d = os.path.join(
-        instances.instance_dir(name),
-        "mods",
-    )
-
-    return (
-        len(os.listdir(d))
-        if os.path.isdir(d)
-        else 0
-    )
-
-# ---------- OptiFine ----------
-
-def _save_optifine_setting(self):
-    if not self.sel:
-        return
-
-    try:
-        cfg = instances.load_cfg(
-            self.sel
-        )
-
-        cfg["optifine"] = bool(
-            self._optifine.get()
-        )
-
-        instances.save_cfg(
-            self.sel,
-            cfg,
-        )
-
-        self._update_optifine_status()
-
-    except Exception as e:
-        self._log_message(
-            f"OptiFine setting save failed: {e}"
-        )
-
-def _update_optifine_status(self):
-    if not self.sel:
-        self.optifine_status.config(
-            text=""
-        )
-        return
-
-    try:
-        core.set_game_dir(
-            instances.instance_dir(
-                self.sel
-            )
-        )
-
-        status = core.get_optifine_status()
-
-        if status["installed"]:
-            self.optifine_status.config(
-                text=(
-                    "OptiFine installed: "
-                    + ", ".join(
-                        status["filenames"]
-                    )
-                ),
-                foreground=ACCENT,
-            )
-        else:
-            self.optifine_status.config(
-                text=(
-                    "OptiFine not installed "
-                    "(automatic or manual)"
-                ),
-                foreground=MUTED,
-            )
-
-    except Exception:
-        self.optifine_status.config(
-            text=""
-        )
-
-def install_optifine(self):
-    if not self.sel:
-        return
-
-    version = self.version
-
-    self.play_btn.config(
-        state="disabled"
-    )
-
-    self.status.config(
-        text=f"Installing OptiFine for Minecraft {version}...",
-        foreground=FG,
-    )
-
-    self.bar.config(
-        mode="indeterminate"
-    )
-
-    self.bar.start(20)
-
-    def worker():
-        try:
-            core.set_game_dir(
-                instances.instance_dir(
-                    self.sel
-                )
-            )
-
-            self.q.put(
-                (
-                    "msg",
-                    f"Installing OptiFine for {version}..."
-                )
-            )
-
-            out = core.install_optifine_for_version(
-                version
-            )
-
-            cfg = instances.load_cfg(
-                self.sel
-            )
-
-            cfg["optifine"] = True
-
-            instances.save_cfg(
-                self.sel,
-                cfg,
-            )
-
-            self.q.put(
-                (
-                    "optifine_done",
-                    f"OptiFine installed: "
-                    f"{os.path.basename(out)}"
-                )
-            )
-
-        except Exception as e:
-            self.q.put(
-                (
-                    "optifine_failed",
-                    str(e),
-                )
-            )
-
-    threading.Thread(
-        target=worker,
-        daemon=True,
-    ).start()
-
-def install_optifine_manual(self):
-    if not self.sel:
-        return
-
-    p = filedialog.askopenfilename(
-        title="Select OptiFine installer",
-        filetypes=[
-            (
-                "OptiFine installer",
-                "*OptiFine*.jar",
-            ),
-            (
-                "Java JAR",
-                "*.jar",
-            ),
-            (
-                "All files",
-                "*.*",
-            ),
-        ],
-    )
-
-    if not p:
-        return
-
-    self.play_btn.config(
-        state="disabled"
-    )
-
-    self.status.config(
-        text="Installing manually selected OptiFine...",
-        foreground=FG,
-    )
-
-    self.bar.config(
-        mode="indeterminate"
-    )
-
-    self.bar.start(20)
-
-    def worker():
-        try:
-            core.set_game_dir(
-                instances.instance_dir(
-                    self.sel
-                )
-            )
-
-            out = core.install_optifine_from_file(
-                p
-            )
-
-            cfg = instances.load_cfg(
-                self.sel
-            )
-
-            cfg["optifine"] = True
-
-            instances.save_cfg(
-                self.sel,
-                cfg,
-            )
-
-            self.q.put(
-                (
-                    "optifine_done",
-                    f"Manual OptiFine installed: "
-                    f"{os.path.basename(out)}"
-                )
-            )
-
-        except Exception as e:
-            self.q.put(
-                (
-                    "optifine_failed",
-                    str(e),
-                )
-            )
-
-    threading.Thread(
-        target=worker,
-        daemon=True,
-    ).start()
-
-# ---------- create / delete / io ----------
-
-def new_inst(self):
-    d = tk.Toplevel(
-        self.root
-    )
-
-    d.title(
-        "New instance"
-    )
-
-    d.configure(
-        bg=BG
-    )
-
-    d.geometry(
-        "380x260"
-    )
-
-    style_dark(d)
-
-    f = ttk.Frame(
-        d,
-        style="Card.TFrame",
-        padding=14,
-    )
-
-    f.pack(
-        fill="both",
-        expand=True,
-    )
-
-    name = tk.StringVar()
-    version = tk.StringVar(
-        value="release"
-    )
-
-    loader = tk.StringVar(
-        value="vanilla"
-    )
-
-    ram = tk.StringVar(
-        value="4G"
-    )
-
-    uname = tk.StringVar(
-        value="Blemm"
-    )
-
-    rows = [
-        (
-            "Name:",
-            ttk.Entry(
-                f,
-                textvariable=name,
-            ),
-        ),
-        (
-            "Version:",
-            ttk.Combobox(
-                f,
-                textvariable=version,
-                values=["release"],
-            ),
-        ),
-        (
-            "Loader:",
-            ttk.Combobox(
-                f,
-                textvariable=loader,
-                state="readonly",
-                values=[
-                    "vanilla",
-                    "forge",
-                    "fabric",
-                    "neoforge",
-                ],
-            ),
-        ),
-        (
-            "RAM:",
-            ttk.Combobox(
-                f,
-                textvariable=ram,
-                state="readonly",
-                values=[
-                    "2G",
-                    "4G",
-                    "6G",
-                    "8G",
-                ],
-            ),
-        ),
-        (
-            "Username:",
-            ttk.Entry(
-                f,
-                textvariable=uname,
-            ),
-        ),
-    ]
-
-    for r, (label, widget) in enumerate(rows):
-        ttk.Label(
-            f,
-            text=label,
-            style="MutedP.TLabel",
-        ).grid(
-            row=r,
-            column=0,
-            sticky="w",
-            pady=3,
-        )
-
-        widget.grid(
-            row=r,
+        right.grid(
+            row=0,
             column=1,
-            sticky="we",
-            pady=3,
-            padx=(8, 0),
+            sticky="nsew",
         )
 
-    f.columnconfigure(
-        1,
-        weight=1,
-    )
+        right.columnconfigure(1, weight=1)
 
-    def fill_versions():
+        self.i_title = ttk.Label(
+            right,
+            text="pick or create an instance →",
+            style="Title.TLabel",
+        )
+
+        self.i_title.grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(0, 6),
+        )
+
+        self.i_info = ttk.Label(
+            right,
+            text="",
+            style="MutedP.TLabel",
+            justify="left",
+            anchor="w",
+        )
+
+        self.i_info.grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(0, 8),
+        )
+
+        # ------------------------------------------------------------
+        # Settings
+        # ------------------------------------------------------------
+
+        settings = ttk.Frame(
+            right,
+            style="Card.TFrame",
+        )
+
+        settings.grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            sticky="w",
+        )
+
+        ttk.Label(
+            settings,
+            text="Username:",
+            style="MutedP.TLabel",
+        ).pack(side="left")
+
+        self._uname = tk.StringVar(value="Blemm")
+
+        ttk.Entry(
+            settings,
+            textvariable=self._uname,
+            width=16,
+        ).pack(
+            side="left",
+            padx=(6, 14),
+        )
+
+        ttk.Label(
+            settings,
+            text="RAM:",
+            style="MutedP.TLabel",
+        ).pack(side="left")
+
+        self._ram = tk.StringVar(value="4G")
+
+        ttk.Combobox(
+            settings,
+            textvariable=self._ram,
+            values=["2G", "4G", "6G", "8G"],
+            width=6,
+            state="readonly",
+        ).pack(
+            side="left",
+            padx=6,
+        )
+
+        # ------------------------------------------------------------
+        # OptiFine
+        # ------------------------------------------------------------
+
+        self._optifine = tk.BooleanVar(value=False)
+
+        self.optifine_check = ttk.Checkbutton(
+            settings,
+            text="Use OptiFine",
+            variable=self._optifine,
+            command=self._save_optifine_setting,
+        )
+
+        self.optifine_check.pack(
+            side="left",
+            padx=(14, 4),
+        )
+
+        ttk.Button(
+            settings,
+            text="Install OptiFine…",
+            command=self.install_optifine,
+        ).pack(
+            side="left",
+            padx=(4, 0),
+        )
+
+        # ------------------------------------------------------------
+        # Play button
+        # ------------------------------------------------------------
+
+        self.play_btn = ttk.Button(
+            right,
+            text="▶   PLAY",
+            style="Play.TButton",
+            command=self.play,
+            state="disabled",
+        )
+
+        self.play_btn.grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            sticky="we",
+            pady=(12, 6),
+        )
+
+        # ------------------------------------------------------------
+        # Modrinth
+        # ------------------------------------------------------------
+
+        ttk.Button(
+            right,
+            text="🔎 Browse & install (Modrinth) — mods / shaders / packs",
+            command=self.browse_mods,
+        ).grid(
+            row=4,
+            column=0,
+            columnspan=2,
+            sticky="w",
+        )
+
+        # ------------------------------------------------------------
+        # Manual file installation
+        # ------------------------------------------------------------
+
+        ttk.Button(
+            right,
+            text="＋ add files… (Ctrl+click several: mods, packs, shaders)",
+            command=self.add_file,
+        ).grid(
+            row=5,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(6, 0),
+        )
+
+        # ------------------------------------------------------------
+        # Status
+        # ------------------------------------------------------------
+
+        self.status = ttk.Label(
+            root,
+            text="Loading version list…",
+            anchor="w",
+        )
+
+        self.status.pack(
+            fill="x",
+            padx=14,
+        )
+
+        self.bar = ttk.Progressbar(
+            root,
+            mode="indeterminate",
+        )
+
+        self.bar.pack(
+            fill="x",
+            padx=14,
+            pady=(2, 6),
+        )
+
+        # ------------------------------------------------------------
+        # Log
+        # ------------------------------------------------------------
+
+        logcard = ttk.Frame(
+            root,
+            style="Card.TFrame",
+            padding=6,
+        )
+
+        logcard.pack(
+            fill="both",
+            expand=True,
+            padx=14,
+            pady=(0, 10),
+        )
+
+        self.log = scrolledtext.ScrolledText(
+            logcard,
+            height=6,
+            state="disabled",
+            font=("Consolas", 9),
+            bg=FIELD,
+            fg=FG,
+            insertbackground=FG,
+            relief="flat",
+        )
+
+        self.log.pack(
+            fill="both",
+            expand=True,
+        )
+
+        # ------------------------------------------------------------
+        # Start
+        # ------------------------------------------------------------
+
+        self.root.after(100, self._drain)
+
+        threading.Thread(
+            target=self._load_versions,
+            daemon=True,
+        ).start()
+
+        self._refresh_list()
+
+    # ================================================================
+    # Versions
+    # ================================================================
+
+    def _load_versions(self):
         try:
-            versions, _, _ = core.list_versions()
+            versions, latest, _ = core.list_versions()
 
-            def sk(v):
+            def sk(version):
                 try:
                     return [
                         int(x)
-                        for x in v.split(".")
+                        for x in version.split(".")
                         if x.isdigit()
                     ]
                 except Exception:
@@ -1048,128 +524,445 @@ def new_inst(self):
                     for v in versions
                     if sk(v) >= [1, 12, 2]
                     and "-" not in v
-                    and not v.startswith(
-                        ("w", "pre", "rc")
-                    )
+                    and not v.startswith(("w", "pre", "rc"))
                 ],
                 key=sk,
                 reverse=True,
             )
 
-            widget = f.grid_slaves(
-                row=1,
-                column=1,
-            )[0]
+            self.q.put(("versions", chosen))
 
-            widget.config(
-                values=["release"] + chosen[:60]
+        except Exception as e:
+            self.q.put(
+                ("error", f"version list failed: {e}")
+            )
+
+    # ================================================================
+    # Instance list
+    # ================================================================
+
+    def _refresh_list(self):
+        self.ilist.delete(0, "end")
+
+        for name in instances.list_instances():
+            self.ilist.insert("end", name)
+
+        self.sel = None
+        self.play_btn.config(state="disabled")
+
+    def _sel_ev(self, _=None):
+        selection = self.ilist.curselection()
+
+        if not selection:
+            return
+
+        name = self.ilist.get(selection[0])
+        cfg = instances.load_cfg(name)
+
+        self.sel = name
+        self.version = cfg["version"]
+        self.loader = cfg.get("loader")
+
+        self._uname.set(
+            cfg.get("username", "Blemm")
+        )
+
+        self._ram.set(
+            cfg.get("ram", "4G")
+        )
+
+        self._optifine.set(
+            bool(cfg.get("optifine", False))
+        )
+
+        self.i_title.config(
+            text=name
+        )
+
+        self.i_info.config(
+            text=(
+                f"version: {cfg['version']}    "
+                f"loader: {cfg.get('loader') or 'vanilla'}\n"
+                f"ram: {cfg.get('ram')}    "
+                f"mods: {self._count_mods(name)}"
+            )
+        )
+
+        self.play_btn.config(
+            state="normal"
+        )
+
+    def _count_mods(self, name):
+        directory = os.path.join(
+            instances.instance_dir(name),
+            "mods",
+        )
+
+        if os.path.isdir(directory):
+            return len(os.listdir(directory))
+
+        return 0
+
+    # ================================================================
+    # OptiFine
+    # ================================================================
+
+    def _save_optifine_setting(self):
+        if not self.sel:
+            return
+
+        try:
+            cfg = instances.load_cfg(self.sel)
+            cfg["optifine"] = bool(
+                self._optifine.get()
+            )
+            instances.save_cfg(
+                self.sel,
+                cfg,
             )
 
         except Exception:
             pass
 
-    threading.Thread(
-        target=fill_versions,
-        daemon=True,
-    ).start()
+    def install_optifine(self):
+        if not self.sel:
+            messagebox.showinfo(
+                "BlemmLauncher",
+                "Select an instance first.",
+            )
+            return
 
-    def go():
-        nm = (
-            name.get().strip()
-            or "New Instance"
+        cfg = instances.load_cfg(self.sel)
+        loader = cfg.get("loader")
+
+        if loader not in ("forge", "neoforge"):
+            messagebox.showinfo(
+                "OptiFine",
+                "For this launcher, OptiFine is installed as a mod.\n\n"
+                "Create/select a Forge or NeoForge instance, then "
+                "use Install OptiFine… again.",
+            )
+            return
+
+        path = filedialog.askopenfilename(
+            title="Select your OptiFine installer",
+            filetypes=[
+                ("OptiFine installer", "*.jar"),
+                ("Java files", "*.jar"),
+                ("All files", "*.*"),
+            ],
         )
 
-        v = version.get()
+        if not path:
+            return
 
-        if v == "release":
+        name = self.sel
+
+        self.play_btn.config(
+            state="disabled"
+        )
+
+        self.status.config(
+            text="Installing OptiFine…",
+            foreground=FG,
+        )
+
+        def worker():
             try:
-                v = core.manifest()[
-                    "latest"
-                ]["release"]
+                cfg = instances.load_cfg(name)
+
+                instances.use(
+                    name,
+                    core,
+                )
+
+                installed = core.install_optifine(
+                    path,
+                    with_forge=True,
+                    version_id=cfg["version"],
+                )
+
+                cfg["optifine"] = True
+
+                instances.save_cfg(
+                    name,
+                    cfg,
+                )
+
+                self.q.put(
+                    (
+                        "optifine_installed",
+                        installed,
+                    )
+                )
+
+            except Exception as e:
+                self.q.put(
+                    (
+                        "error",
+                        f"OptiFine installation failed:\n{e}",
+                    )
+                )
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+        ).start()
+
+    # ================================================================
+    # New instance
+    # ================================================================
+
+    def new_inst(self):
+        d = tk.Toplevel(self.root)
+
+        d.title("New instance")
+        d.configure(bg=BG)
+        d.geometry("380x260")
+
+        style_dark(d)
+
+        f = ttk.Frame(
+            d,
+            style="Card.TFrame",
+            padding=14,
+        )
+
+        f.pack(
+            fill="both",
+            expand=True,
+        )
+
+        name = tk.StringVar()
+        version = tk.StringVar(value="release")
+        loader = tk.StringVar(value="vanilla")
+        ram = tk.StringVar(value="4G")
+        uname = tk.StringVar(value="Blemm")
+
+        rows = [
+            (
+                "Name:",
+                ttk.Entry(
+                    f,
+                    textvariable=name,
+                ),
+            ),
+            (
+                "Version:",
+                ttk.Combobox(
+                    f,
+                    textvariable=version,
+                    values=["release"],
+                ),
+            ),
+            (
+                "Loader:",
+                ttk.Combobox(
+                    f,
+                    textvariable=loader,
+                    state="readonly",
+                    values=[
+                        "vanilla",
+                        "forge",
+                        "fabric",
+                        "neoforge",
+                    ],
+                ),
+            ),
+            (
+                "RAM:",
+                ttk.Combobox(
+                    f,
+                    textvariable=ram,
+                    state="readonly",
+                    values=[
+                        "2G",
+                        "4G",
+                        "6G",
+                        "8G",
+                    ],
+                ),
+            ),
+            (
+                "Username:",
+                ttk.Entry(
+                    f,
+                    textvariable=uname,
+                ),
+            ),
+        ]
+
+        for r, (label, widget) in enumerate(rows):
+            ttk.Label(
+                f,
+                text=label,
+                style="MutedP.TLabel",
+            ).grid(
+                row=r,
+                column=0,
+                sticky="w",
+                pady=3,
+            )
+
+            widget.grid(
+                row=r,
+                column=1,
+                sticky="we",
+                pady=3,
+                padx=(8, 0),
+            )
+
+        f.columnconfigure(
+            1,
+            weight=1,
+        )
+
+        def fill_versions():
+            try:
+                versions, _, _ = core.list_versions()
+
+                def sk(version):
+                    try:
+                        return [
+                            int(x)
+                            for x in version.split(".")
+                            if x.isdigit()
+                        ]
+                    except Exception:
+                        return [-1]
+
+                chosen = sorted(
+                    [
+                        v
+                        for v in versions
+                        if sk(v) >= [1, 12, 2]
+                        and "-" not in v
+                        and not v.startswith(
+                            ("w", "pre", "rc")
+                        )
+                    ],
+                    key=sk,
+                    reverse=True,
+                )
+
+                widget = f.grid_slaves(
+                    row=1,
+                    column=1,
+                )[0]
+
+                widget.config(
+                    values=["release"] + chosen[:60]
+                )
 
             except Exception:
+                pass
+
+        threading.Thread(
+            target=fill_versions,
+            daemon=True,
+        ).start()
+
+        def go():
+            nm = name.get().strip()
+
+            if not nm:
+                nm = "New Instance"
+
+            v = version.get()
+
+            if v == "release":
+                try:
+                    v = core.manifest()["latest"]["release"]
+
+                except Exception:
+                    messagebox.showerror(
+                        "Blemm",
+                        "couldn't resolve 'release' - "
+                        "type a specific version",
+                        parent=d,
+                    )
+                    return
+
+            ld = loader.get()
+
+            if ld == "vanilla":
+                ld = None
+
+            try:
+                instances.create(
+                    nm,
+                    v,
+                    ld,
+                    ram.get(),
+                    uname.get(),
+                )
+
+                d.destroy()
+                self._refresh_list()
+
+            except Exception as e:
                 messagebox.showerror(
                     "Blemm",
-                    "couldn't resolve 'release' - "
-                    "type a specific version",
+                    str(e),
                     parent=d,
                 )
 
-                return
-
-        ld = loader.get()
-
-        ld = (
-            None
-            if ld == "vanilla"
-            else ld
+        ttk.Button(
+            f,
+            text="Create",
+            style="Play.TButton",
+            command=go,
+        ).grid(
+            row=len(rows),
+            column=0,
+            columnspan=2,
+            sticky="we",
+            pady=(10, 0),
         )
 
-        try:
-            instances.create(
-                nm,
-                v,
-                ld,
-                ram.get(),
-                uname.get(),
+    # ================================================================
+    # Delete
+    # ================================================================
+
+    def del_inst(self):
+        if not self.sel:
+            return
+
+        if messagebox.askyesno(
+            "Blemm",
+            f"Delete instance '{self.sel}'?\n"
+            "(saves are deleted too!)",
+        ):
+            instances.delete(
+                self.sel
             )
 
-            d.destroy()
             self._refresh_list()
 
-        except Exception as e:
-            messagebox.showerror(
-                "Blemm",
-                str(e),
-                parent=d,
-            )
+    # ================================================================
+    # Export
+    # ================================================================
 
-    ttk.Button(
-        f,
-        text="Create",
-        style="Play.TButton",
-        command=go,
-    ).grid(
-        row=len(rows),
-        column=0,
-        columnspan=2,
-        sticky="we",
-        pady=(10, 0),
-    )
+    def export_inst(self):
+        if not self.sel:
+            return
 
-def del_inst(self):
-    if not self.sel:
-        return
-
-    if messagebox.askyesno(
-        "Blemm",
-        f"Delete instance '{self.sel}'?\n"
-        "(saves are deleted too!)",
-    ):
-        instances.delete(
-            self.sel
+        path = filedialog.asksaveasfilename(
+            defaultextension=".zip",
+            initialfile=f"{self.sel}.zip",
         )
 
-        self._refresh_list()
+        if not path:
+            return
 
-def export_inst(self):
-    if not self.sel:
-        return
-
-    p = filedialog.asksaveasfilename(
-        defaultextension=".zip",
-        initialfile=f"{self.sel}.zip",
-    )
-
-    if p:
         try:
             instances.export(
                 self.sel,
-                p,
+                path,
             )
 
             self.status.config(
-                text=f"exported → {p}",
+                text=f"exported → {path}",
                 foreground=ACCENT,
             )
 
@@ -1179,297 +972,228 @@ def export_inst(self):
                 str(e),
             )
 
-def import_inst(self):
-    p = filedialog.askopenfilename(
-        filetypes=[
-            (
-                "Instance zip",
-                "*.zip",
-            )
-        ],
-    )
+    # ================================================================
+    # Import
+    # ================================================================
 
-    if not p:
-        return
-
-    try:
-        n = instances.import_from_zip(
-            p
+    def import_inst(self):
+        path = filedialog.askopenfilename(
+            filetypes=[
+                ("Instance zip", "*.zip")
+            ]
         )
 
-        self._refresh_list()
-
-        self.status.config(
-            text=f"imported {n}",
-            foreground=ACCENT,
-        )
-
-    except Exception as e:
-        messagebox.showerror(
-            "Blemm",
-            str(e),
-        )
-
-def make_shortcut(self):
-    if not self.sel:
-        return
-
-    try:
-        p = instances.shortcut(
-            self.sel
-        )
-
-        self.status.config(
-            text=f"shortcut → {p}",
-            foreground=ACCENT,
-        )
-
-    except Exception as e:
-        messagebox.showerror(
-            "Blemm",
-            str(e),
-        )
-
-def add_file(self):
-    if not self.sel:
-        return
-
-    paths = filedialog.askopenfilenames(
-        title="Pick mods / packs (Ctrl+click for several)",
-        filetypes=[
-            (
-                "Minecraft files",
-                "*.jar *.zip",
-            ),
-            (
-                "All files",
-                "*.*",
-            ),
-        ],
-    )
-
-    if not paths:
-        return
-
-    core.set_game_dir(
-        instances.instance_dir(
-            self.sel
-        )
-    )
-
-    try:
-        added = core.add_content_auto(
-            paths
-        )
-
-        self.status.config(
-            text=", ".join(added),
-            foreground=ACCENT,
-        )
-
-        self._sel_ev()
-        self._update_optifine_status()
-
-    except Exception as e:
-        messagebox.showerror(
-            "Blemm",
-            str(e),
-        )
-
-# ---------- modrinth ----------
-
-def browse_mods(self):
-    if not self.sel:
-        return
-
-    d = tk.Toplevel(
-        self.root
-    )
-
-    d.title(
-        f"Modrinth — {self.sel}"
-    )
-
-    d.configure(
-        bg=BG
-    )
-
-    style_dark(d)
-
-    d.geometry(
-        "600x460"
-    )
-
-    f = ttk.Frame(
-        d,
-        style="Card.TFrame",
-        padding=10,
-    )
-
-    f.pack(
-        fill="both",
-        expand=True,
-    )
-
-    top = ttk.Frame(
-        f,
-        style="Card.TFrame",
-    )
-
-    top.pack(
-        fill="x"
-    )
-
-    q = tk.StringVar()
-
-    ttk.Entry(
-        top,
-        textvariable=q,
-    ).pack(
-        side="left",
-        fill="x",
-        expand=True,
-    )
-
-    ptype = tk.StringVar(
-        value="mod"
-    )
-
-    ttk.Combobox(
-        top,
-        textvariable=ptype,
-        width=12,
-        state="readonly",
-        values=[
-            "mod",
-            "shader",
-            "resourcepack",
-        ],
-    ).pack(
-        side="left",
-        padx=6,
-    )
-
-    ttk.Button(
-        top,
-        text="Search",
-        command=lambda: search(),
-    ).pack(
-        side="left",
-        padx=6,
-    )
-
-    results = tk.Listbox(
-        f,
-        bg=FIELD,
-        fg=FG,
-        relief="flat",
-        highlightthickness=0,
-        selectbackground=ACCENT,
-        selectforeground="#10240f",
-        selectmode="extended",
-        exportselection=False,
-    )
-
-    results.pack(
-        fill="both",
-        expand=True,
-        pady=8,
-    )
-
-    mid = ttk.Frame(
-        f,
-        style="Card.TFrame",
-    )
-
-    mid.pack(
-        fill="x"
-    )
-
-    ttk.Button(
-        mid,
-        text="⬇  Install selected",
-        style="Play.TButton",
-        command=lambda: install(),
-    ).pack(
-        side="left"
-    )
-
-    lbl = ttk.Label(
-        f,
-        text="type a name, Search, Ctrl/Shift+click to multi-select, Install",
-        style="MutedP.TLabel",
-    )
-
-    lbl.pack(
-        anchor="w",
-        pady=(6, 0),
-    )
-
-    hits = []
-
-    def search():
-        nonlocal hits
+        if not path:
+            return
 
         try:
-            ld = (
-                self.loader
-                if (
-                    self.loader
-                    and ptype.get() == "mod"
-                )
-                else None
+            name = instances.import_from_zip(
+                path
             )
 
-            hits = instances.modrinth_search(
-                q.get(),
-                self.version,
-                ld,
-                ptype.get(),
-            )
+            self._refresh_list()
 
-            results.delete(
-                0,
-                "end",
-            )
-
-            for h in hits:
-                results.insert(
-                    "end",
-                    f'{h["title"]}  — '
-                    f'{h["author"]}  '
-                    f'({h["downs"]}↓)',
-                )
-
-            lbl.config(
-                text=(
-                    f"{len(hits)} results for "
-                    f"{self.version} / "
-                    f"{ptype.get()}"
-                    + (
-                        f" / {self.loader}"
-                        if ld
-                        else ""
-                    )
-                ),
-                foreground=FG,
+            self.status.config(
+                text=f"imported {name}",
+                foreground=ACCENT,
             )
 
         except Exception as e:
-            lbl.config(
-                text=f"search failed: {e}"
+            messagebox.showerror(
+                "Blemm",
+                str(e),
             )
 
-    def install(_=None):
-        sel = results.curselection()
+    # ================================================================
+    # Shortcut
+    # ================================================================
 
-        if not sel:
+    def make_shortcut(self):
+        if not self.sel:
             return
 
-        ok, errs = [], []
+        try:
+            path = instances.shortcut(
+                self.sel
+            )
 
-        for i in sel:
-            h = hits[i]
+            self.status.config(
+                text=f"shortcut → {path}",
+                foreground=ACCENT,
+            )
+
+        except Exception as e:
+            messagebox.showerror(
+                "Blemm",
+                str(e),
+            )
+
+    # ================================================================
+    # Add files manually
+    # ================================================================
+
+    def add_file(self):
+        if not self.sel:
+            return
+
+        paths = filedialog.askopenfilenames(
+            title="Pick mods / packs (Ctrl+click for several)",
+            filetypes=[
+                (
+                    "Minecraft files",
+                    "*.jar *.zip",
+                ),
+                (
+                    "All files",
+                    "*.*",
+                ),
+            ],
+        )
+
+        if not paths:
+            return
+
+        try:
+            core.set_game_dir(
+                instances.instance_dir(
+                    self.sel
+                )
+            )
+
+            added = core.add_content_auto(
+                paths
+            )
+
+            self.status.config(
+                text=", ".join(added),
+                foreground=ACCENT,
+            )
+
+            self._sel_ev()
+
+        except Exception as e:
+            messagebox.showerror(
+                "Blemm",
+                str(e),
+            )
+
+    # ================================================================
+    # Modrinth browser
+    # ================================================================
+
+    def browse_mods(self):
+        if not self.sel:
+            return
+
+        d = tk.Toplevel(self.root)
+
+        d.title(
+            f"Modrinth — {self.sel}"
+        )
+
+        d.configure(bg=BG)
+
+        style_dark(d)
+
+        d.geometry(
+            "600x460"
+        )
+
+        f = ttk.Frame(
+            d,
+            style="Card.TFrame",
+            padding=10,
+        )
+
+        f.pack(
+            fill="both",
+            expand=True,
+        )
+
+        top = ttk.Frame(
+            f,
+            style="Card.TFrame",
+        )
+
+        top.pack(
+            fill="x"
+        )
+
+        q = tk.StringVar()
+
+        ttk.Entry(
+            top,
+            textvariable=q,
+        ).pack(
+            side="left",
+            fill="x",
+            expand=True,
+        )
+
+        ptype = tk.StringVar(
+            value="mod"
+        )
+
+        ttk.Combobox(
+            top,
+            textvariable=ptype,
+            width=12,
+            state="readonly",
+            values=[
+                "mod",
+                "shader",
+                "resourcepack",
+            ],
+        ).pack(
+            side="left",
+            padx=6,
+        )
+
+        results = tk.Listbox(
+            f,
+            bg=FIELD,
+            fg=FG,
+            relief="flat",
+            highlightthickness=0,
+            selectbackground=ACCENT,
+            selectforeground="#10240f",
+            selectmode="extended",
+            exportselection=False,
+        )
+
+        results.pack(
+            fill="both",
+            expand=True,
+            pady=8,
+        )
+
+        mid = ttk.Frame(
+            f,
+            style="Card.TFrame",
+        )
+
+        mid.pack(
+            fill="x"
+        )
+
+        lbl = ttk.Label(
+            f,
+            text=(
+                "type a name, Search, Ctrl/Shift+click "
+                "to multi-select, Install"
+            ),
+            style="MutedP.TLabel",
+        )
+
+        lbl.pack(
+            anchor="w",
+            pady=(6, 0),
+        )
+
+        hits = []
+
+        def search():
+            nonlocal hits
 
             try:
                 ld = (
@@ -1481,417 +1205,434 @@ def browse_mods(self):
                     else None
                 )
 
-                fn = instances.modrinth_install(
-                    h["id"],
+                hits = instances.modrinth_search(
+                    q.get(),
                     self.version,
                     ld,
                     ptype.get(),
                 )
 
-                ok.append(fn)
+                results.delete(
+                    0,
+                    "end",
+                )
+
+                for h in hits:
+                    results.insert(
+                        "end",
+                        f'{h["title"]} — '
+                        f'{h["author"]} '
+                        f'({h["downs"]}↓)',
+                    )
+
+                lbl.config(
+                    text=(
+                        f"{len(hits)} results for "
+                        f"{self.version} / "
+                        f"{ptype.get()}"
+                        + (
+                            f" / {ld}"
+                            if ld
+                            else ""
+                        )
+                    ),
+                    foreground=FG,
+                )
 
             except Exception as e:
-                errs.append(
-                    f'{h["title"]}: {e}'
+                lbl.config(
+                    text=f"search failed: {e}",
+                    foreground=DANGER,
                 )
 
-        msg = (
-            f"installed {len(ok)}: "
-            f"{', '.join(ok)}"
-            if ok
-            else ""
-        )
+        def install():
+            selection = results.curselection()
 
-        if errs:
-            msg += (
-                "\nfailed: "
-                + "; ".join(errs)
-            )
+            if not selection:
+                return
 
-        lbl.config(
-            text=msg,
-            foreground=(
-                ACCENT
-                if ok and not errs
-                else DANGER
-            ),
-        )
+            ok = []
+            errs = []
 
-        self._sel_ev()
+            for i in selection:
+                h = hits[i]
 
-    results.bind(
-        "<Double-Button-1>",
-        lambda e: None,
-    )
-
-# ---------- play ----------
-
-def play(self):
-    if not self.sel:
-        return
-
-    self.play_btn.config(
-        state="disabled",
-        text="Working…",
-    )
-
-    self.bar.config(
-        mode="indeterminate"
-    )
-
-    self.bar.start(20)
-
-    self.status.config(
-        text="Preparing…",
-        foreground=FG,
-    )
-
-    core.set_reporter(
-        lambda t, dn=None, tt=None:
-        self.q.put(
-            (
-                "stage",
-                t,
-                dn,
-                tt,
-            )
-        )
-    )
-
-    name = self.sel
-
-    # Capture these before starting the worker so the GUI variables
-    # are not being read from another thread while the user changes them.
-    username = self._uname.get() or "Blemm"
-    ram = self._ram.get()
-    use_optifine = bool(
-        self._optifine.get()
-    )
-
-    def worker():
-        try:
-            cfg = instances.load_cfg(
-                name
-            )
-
-            instances.use(
-                name,
-                core,
-            )
-
-            self.q.put(
-                (
-                    "stage",
-                    "Preparing instance…",
-                    None,
-                    None,
-                )
-            )
-
-            vid = cfg["version"]
-            ld = cfg.get("loader")
-
-            if ld == "forge":
-                vid = core.install_forge(
-                    vid,
-                    cfg.get(
-                        "loader_build"
-                    ),
-                )
-
-            elif ld == "neoforge":
-                b = instances.install_neoforge(
-                    vid,
-                    cfg.get(
-                        "loader_build"
-                    ),
-                )
-
-                cfg["loader_build"] = b
-
-                instances.save_cfg(
-                    name,
-                    cfg,
-                )
-
-            elif ld == "fabric":
-                b = instances.install_fabric(
-                    vid
-                )
-
-                cfg.setdefault(
-                    "loader_build",
-                    b,
-                )
-
-                instances.save_cfg(
-                    name,
-                    cfg,
-                )
-
-            # Make sure OptiFine is actually present when the user
-            # has enabled it. We do NOT silently download it here:
-            # the user can explicitly install it from the GUI or
-            # manually. This is what allows manual fallback.
-            if use_optifine:
-                status = core.get_optifine_status()
-
-                if not status["installed"]:
-                    raise RuntimeError(
-                        "OptiFine is enabled, but no OptiFine "
-                        "mod was found in this instance.\n\n"
-                        "Use 'Install OptiFine' or "
-                        "'Install OptiFine manually' first."
-                    )
-
-                if not (
-                    ld in (
-                        "forge",
-                        "neoforge",
-                    )
-                ):
-                    self.q.put(
-                        (
-                            "msg",
-                            "WARNING: OptiFine is installed, "
-                            "but this instance is not using "
-                            "Forge/NeoForge."
+                try:
+                    ld = (
+                        self.loader
+                        if (
+                            self.loader
+                            and ptype.get() == "mod"
                         )
+                        else None
                     )
 
-            self.q.put(
-                (
-                    "msg",
-                    f"launching {name}: {vid}",
+                    filename = instances.modrinth_install(
+                        h["id"],
+                        self.version,
+                        ld,
+                        ptype.get(),
+                    )
+
+                    ok.append(filename)
+
+                except Exception as e:
+                    errs.append(
+                        f'{h["title"]}: {e}'
+                    )
+
+            msg = ""
+
+            if ok:
+                msg = (
+                    f"installed {len(ok)}: "
+                    f"{', '.join(ok)}"
                 )
-            )
 
-            core.launch(
-                vid,
-                username,
-                ram,
-                optifine=use_optifine,
-            )
+            if errs:
+                if msg:
+                    msg += "\n"
 
-            core.set_reporter(
-                None
-            )
-
-            self.q.put(
-                (
-                    "done",
-                    f"played {name} ♥",
+                msg += (
+                    "failed: "
+                    + "; ".join(errs)
                 )
+
+            lbl.config(
+                text=msg,
+                foreground=(
+                    ACCENT
+                    if ok and not errs
+                    else DANGER
+                ),
             )
 
-        except SystemExit as e:
-            core.set_reporter(
-                None
-            )
+            self._sel_ev()
 
-            self.q.put(
-                (
-                    "error",
-                    f"aborted: {e}",
+        ttk.Button(
+            top,
+            text="Search",
+            command=search,
+        ).pack(
+            side="left",
+            padx=6,
+        )
+
+        ttk.Button(
+            mid,
+            text="⬇  Install selected",
+            style="Play.TButton",
+            command=install,
+        ).pack(
+            side="left"
+        )
+
+    # ================================================================
+    # Play
+    # ================================================================
+
+    def play(self):
+        if not self.sel:
+            return
+
+        self.play_btn.config(
+            state="disabled",
+            text="Working…",
+        )
+
+        self.bar.config(
+            mode="indeterminate"
+        )
+
+        self.bar.start(20)
+
+        self.status.config(
+            text="Preparing…",
+            foreground=FG,
+        )
+
+        core.set_reporter(
+            lambda t, dn=None, tt=None:
+                self.q.put(
+                    ("stage", t, dn, tt)
                 )
-            )
+        )
 
-        except Exception as e:
-            core.set_reporter(
-                None
-            )
+        name = self.sel
 
-            self.q.put(
-                (
-                    "error",
-                    str(e),
+        def worker():
+            try:
+                cfg = instances.load_cfg(
+                    name
                 )
-            )
 
-    threading.Thread(
-        target=worker,
-        daemon=True,
-    ).start()
+                instances.use(
+                    name,
+                    core,
+                )
 
-# ---------- queue ----------
+                self.q.put(
+                    (
+                        "stage",
+                        "Preparing instance…",
+                        None,
+                        None,
+                    )
+                )
 
-def _log_message(self, message):
-    self.log.config(
-        state="normal"
-    )
+                vid = cfg["version"]
+                loader = cfg.get("loader")
 
-    self.log.insert(
-        "end",
-        message + "\n",
-    )
+                if loader == "forge":
+                    vid = core.install_forge(
+                        vid,
+                        cfg.get("loader_build"),
+                    )
 
-    self.log.see(
-        "end"
-    )
+                elif loader == "neoforge":
+                    build = instances.install_neoforge(
+                        vid,
+                        cfg.get("loader_build"),
+                    )
 
-    self.log.config(
-        state="disabled"
-    )
+                    cfg["loader_build"] = build
 
-def _drain(self):
-    try:
-        while True:
-            kind, *data = (
-                self.q.get_nowait()
-            )
+                    instances.save_cfg(
+                        name,
+                        cfg,
+                    )
 
-            if kind == "stage":
-                t, dn, tt = data
+                elif loader == "fabric":
+                    build = instances.install_fabric(
+                        vid
+                    )
 
-                if tt:
+                    cfg.setdefault(
+                        "loader_build",
+                        build,
+                    )
+
+                    instances.save_cfg(
+                        name,
+                        cfg,
+                    )
+
+                self.q.put(
+                    (
+                        "msg",
+                        f"launching {name}: {vid}",
+                    )
+                )
+
+                core.launch(
+                    vid,
+                    self._uname.get() or "Blemm",
+                    self._ram.get(),
+                    optifine=bool(
+                        self._optifine.get()
+                    ),
+                )
+
+                core.set_reporter(
+                    None
+                )
+
+                self.q.put(
+                    (
+                        "done",
+                        f"played {name} ♥",
+                    )
+                )
+
+            except SystemExit as e:
+                core.set_reporter(None)
+
+                self.q.put(
+                    (
+                        "error",
+                        f"aborted: {e}",
+                    )
+                )
+
+            except Exception as e:
+                core.set_reporter(None)
+
+                self.q.put(
+                    (
+                        "error",
+                        str(e),
+                    )
+                )
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+        ).start()
+
+    # ================================================================
+    # Queue / UI updates
+    # ================================================================
+
+    def _drain(self):
+        try:
+            while True:
+                kind, *data = self.q.get_nowait()
+
+                if kind == "stage":
+                    text_value, done, total = data
+
+                    if total:
+                        self.status.config(
+                            text=(
+                                f"{text_value} "
+                                f"({done:,} / {total:,})"
+                            ),
+                            foreground=FG,
+                        )
+
+                        self.bar.config(
+                            mode="determinate",
+                            value=(
+                                done / total * 100
+                            ),
+                        )
+
+                    else:
+                        self.status.config(
+                            text=text_value,
+                            foreground=FG,
+                        )
+
+                        self.bar.config(
+                            mode="indeterminate"
+                        )
+
+                elif kind == "versions":
                     self.status.config(
                         text=(
-                            f"{t}  "
-                            f"({dn:,} / {tt:,})"
+                            f"{len(data[0])} "
+                            "versions loaded"
                         ),
-                        foreground=FG,
+                        foreground=MUTED,
                     )
+
+                elif kind == "msg":
+                    self.log.config(
+                        state="normal"
+                    )
+
+                    self.log.insert(
+                        "end",
+                        data[0] + "\n",
+                    )
+
+                    self.log.see("end")
+
+                    self.log.config(
+                        state="disabled"
+                    )
+
+                elif kind == "optifine_installed":
+                    installed = data[0]
+
+                    self._optifine.set(
+                        True
+                    )
+
+                    self.play_btn.config(
+                        state="normal",
+                        text="▶   PLAY",
+                    )
+
+                    self.status.config(
+                        text=(
+                            "OptiFine installed: "
+                            + os.path.basename(installed)
+                        ),
+                        foreground=ACCENT,
+                    )
+
+                    self.log.config(
+                        state="normal"
+                    )
+
+                    self.log.insert(
+                        "end",
+                        "OptiFine installed: "
+                        + installed
+                        + "\n",
+                    )
+
+                    self.log.see("end")
+
+                    self.log.config(
+                        state="disabled"
+                    )
+
+                    self._sel_ev()
+
+                elif kind == "done":
+                    self.play_btn.config(
+                        state="normal",
+                        text="▶   PLAY",
+                    )
+
+                    self.bar.stop()
 
                     self.bar.config(
                         mode="determinate",
-                        value=(
-                            dn / tt * 100
-                        ),
+                        value=100,
                     )
 
-                else:
                     self.status.config(
-                        text=t,
-                        foreground=FG,
+                        text=data[0],
+                        foreground=ACCENT,
                     )
+
+                elif kind == "error":
+                    self.play_btn.config(
+                        state="normal",
+                        text="▶   PLAY",
+                    )
+
+                    self.bar.stop()
 
                     self.bar.config(
-                        mode="indeterminate"
+                        mode="determinate",
+                        value=0,
                     )
 
-            elif kind == "versions":
-                self.status.config(
-                    text=(
-                        f"{len(data[0])} "
-                        "versions loaded"
-                    ),
-                    foreground=MUTED,
-                )
+                    self.status.config(
+                        text="Failed — see log",
+                        foreground=DANGER,
+                    )
 
-            elif kind == "msg":
-                self._log_message(
-                    data[0]
-                )
+                    self.log.config(
+                        state="normal"
+                    )
 
-            elif kind == "optifine_done":
-                self.play_btn.config(
-                    state="normal",
-                    text="▶   PLAY",
-                )
+                    self.log.insert(
+                        "end",
+                        f"ERROR: {data[0]}\n",
+                    )
 
-                self.bar.stop()
+                    self.log.see("end")
 
-                self.bar.config(
-                    mode="determinate",
-                    value=100,
-                )
+                    self.log.config(
+                        state="disabled"
+                    )
 
-                self.status.config(
-                    text=data[0],
-                    foreground=ACCENT,
-                )
+        except queue.Empty:
+            pass
 
-                self._log_message(
-                    data[0]
-                )
+        self.root.after(
+            100,
+            self._drain,
+        )
 
-                self._update_optifine_status()
-
-            elif kind == "optifine_failed":
-                self.play_btn.config(
-                    state="normal",
-                    text="▶   PLAY",
-                )
-
-                self.bar.stop()
-
-                self.bar.config(
-                    mode="determinate",
-                    value=0,
-                )
-
-                self.status.config(
-                    text="OptiFine installation failed",
-                    foreground=DANGER,
-                )
-
-                self._log_message(
-                    "OptiFine ERROR: "
-                    + data[0]
-                )
-
-                # This is intentional: automatic installation
-                # failure does NOT prevent manual installation.
-                messagebox.showerror(
-                    "OptiFine installation failed",
-                    data[0]
-                    + "\n\n"
-                    "You can download the correct OptiFine "
-                    "installer yourself and use "
-                    "'Install OptiFine manually'.",
-                    parent=self.root,
-                )
-
-            elif kind == "done":
-                self.play_btn.config(
-                    state="normal",
-                    text="▶   PLAY",
-                )
-
-                self.bar.stop()
-
-                self.bar.config(
-                    mode="determinate",
-                    value=100,
-                )
-
-                self.status.config(
-                    text=data[0],
-                    foreground=ACCENT,
-                )
-
-            elif kind == "error":
-                self.play_btn.config(
-                    state="normal",
-                    text="▶   PLAY",
-                )
-
-                self.bar.stop()
-
-                self.bar.config(
-                    mode="determinate",
-                    value=0,
-                )
-
-                self.status.config(
-                    text="Failed — see log",
-                    foreground=DANGER,
-                )
-
-                self._log_message(
-                    "ERROR: " + data[0]
-                )
-
-    except queue.Empty:
-        pass
-
-    self.root.after(
-        100,
-        self._drain,
-    )
-```
 
 def run():
-root = tk.Tk()
-App(root)
-root.mainloop()
+    root = tk.Tk()
+    App(root)
+    root.mainloop()
+```
