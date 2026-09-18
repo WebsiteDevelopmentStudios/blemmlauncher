@@ -43,6 +43,7 @@ class App:
         ttk.Label(root, text="vanilla · forge · optifine · mods · textures · shaders",
                   style="Muted.TLabel").pack(pady=(0, 12))
 
+        # ---- main card ----
         card = ttk.Frame(root, style="Card.TFrame", padding=16)
         card.pack(fill="x", padx=18)
         card.columnconfigure(1, weight=1)
@@ -62,7 +63,7 @@ class App:
         self.ram.set("4G")
         row(2, "RAM", self.ram)
 
-        # ---- forge + optifine row ----
+        # ---- forge + optifine (optifine locked until forge is on) ----
         forge_row = ttk.Frame(card, style="Card.TFrame")
         forge_row.grid(row=3, column=0, columnspan=2, sticky="w", pady=4)
         self.forge_on = tk.BooleanVar(value=False)
@@ -94,9 +95,11 @@ class App:
         self.imp_label = ttk.Label(imp, text="", style="Muted.TLabel", wraplength=440)
         self.imp_label.pack(anchor="w")
 
+        # ---- play ----
         self.play_btn = ttk.Button(root, text="▶   PLAY", style="Play.TButton", command=self.play)
         self.play_btn.pack(fill="x", padx=18, pady=14)
 
+        # ---- progress + log ----
         self.status = ttk.Label(root, text="Loading version list…", anchor="w")
         self.status.pack(fill="x", padx=18)
         self.bar = ttk.Progressbar(root, mode="indeterminate", maximum=100)
@@ -128,36 +131,37 @@ class App:
             self.version_map.update(zip(labels, chosen))
             self.q.put(("versions", labels))
         except Exception as e:
-            self.q.put(("stage", f"Couldn't load version list: {e}", None, None))
+            self.q.put(("stage", f"Version list failed: {e}", None, None))
+            self.q.put(("error", f"Couldn't load versions: {e}"))
 
-    # ---------- forge / optifine logic ----------
+    # ---------- forge / optifine ----------
     def _toggle_forge(self):
         if self.forge_on.get():
             self.forge.configure(state="normal")
             self.optifine_ck.configure(state="normal")
-            if not self.optifine_path:
-                self.of_label.config(text="OptiFine: on (no jar picked yet)", foreground=MUTED)
+            self.of_label.config(text="OptiFine: on (pick a jar)", foreground=MUTED)
         else:
             self.forge.configure(state="disabled")
-            self.optifine_on.set(False)                    # forge off => optifine off
+            self.optifine_on.set(False)
+            self.optifine_path = None
             self.optifine_ck.configure(state="disabled")
             self.of_label.config(text="OptiFine: off — tick Forge to enable", foreground=MUTED)
 
     def _pick_optifine(self):
-        if not self.optifine_on.get() and not self.forge_on.get():
-            # 'pick jar…' button pressed while unticked - just check the box if forge is on
-            if self.forge_on.get(): self.optifine_on.set(True)
-        if self.optifine_on.get():
-            p = filedialog.askopenfilename(title="Pick OptiFine installer jar",
-                                          filetypes=[("OptiFine installer", "*.jar")])
-            if p:
-                self.optifine_path = p
-                self.of_label.config(text=f"OptiFine: {os.path.basename(p)} (as Forge mod)",
-                                     foreground=ACCENT)
-                return
+        if not self.forge_on.get():
+            return
+        if not self.optifine_on.get():
+            self.optifine_on.set(True)
+        p = filedialog.askopenfilename(title="Pick OptiFine installer jar",
+                                      filetypes=[("OptiFine installer", "*.jar")])
+        if p:
+            self.optifine_path = p
+            self.of_label.config(text=f"OptiFine: {os.path.basename(p)} (as Forge mod)",
+                                 foreground=ACCENT)
+        else:
             self.optifine_on.set(False)
-        self.optifine_path = None
-        self.of_label.config(text="OptiFine: off", foreground=MUTED)
+            self.optifine_path = None
+            self.of_label.config(text="OptiFine: on (no jar picked)", foreground=MUTED)
 
     # ---------- imports ----------
     def _import_files(self, kind):
@@ -197,7 +201,7 @@ class App:
                     self.log.see("end"); self.log.config(state="disabled")
                 elif kind == "done":
                     self.play_btn.config(state="normal", text="▶   PLAY")
-                    self.bar.config(mode="determinate", value=100)
+                    self.bar.stop(); self.bar.config(mode="determinate", value=100)
                     self.status.config(text=data[0], foreground=ACCENT)
                 elif kind == "error":
                     self.play_btn.config(state="normal", text="▶   PLAY")
@@ -216,15 +220,15 @@ class App:
         if vid == "Latest release": vid = "release"
         self.play_btn.config(state="disabled", text="Working…")
         self.bar.config(mode="indeterminate"); self.bar.start(20)
-        self.status.config(text="Fetching version list…", foreground=FG)
+        self.status.config(text="Contacting Mojang servers…", foreground=FG)
         core.set_reporter(lambda text, done=None, total=None:
                           self.q.put(("stage", text, done, total)))
-        # optifine only rides along when forge is ticked AND a jar is picked
         use_optifine = self.optifine_path if (self.forge_on.get() and self.optifine_on.get()) else None
         threading.Thread(target=self._play, args=(vid, use_optifine), daemon=True).start()
 
     def _play(self, vid, optifine):
         try:
+            self.q.put(("stage", "Contacting Mojang servers…", None, None))
             if self.forge_on.get():
                 build = self.forge.get().strip()
                 vid = core.install_forge(vid, build if build not in ("", "auto") else None)
@@ -232,6 +236,9 @@ class App:
             core.launch(vid, self.name.get() or "Blemm", self.ram.get(), optifine)
             core.set_reporter(None)
             self.q.put(("done", f"Played {vid} ♥"))
+        except SystemExit as e:              # core raised sys.exit - was invisible before
+            core.set_reporter(None)
+            self.q.put(("error", f"Launch aborted: {e}"))
         except Exception as e:
             core.set_reporter(None)
             self.q.put(("error", str(e)))
