@@ -1,4 +1,3 @@
-```python
 """BlemmLauncher core - versions, Forge, OptiFine, mods, packs, Java, progress."""
 import socket
 socket.setdefaulttimeout(25)
@@ -3366,4 +3365,3 @@ def run():
     App(root)
 
     root.mainloop()
-```
