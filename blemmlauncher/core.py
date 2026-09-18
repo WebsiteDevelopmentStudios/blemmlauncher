@@ -70,12 +70,6 @@ def set_reporter(fn):
 
 
 def _emit(kind, text, done=None, total=None):
-    """Send something to the GUI (if a reporter is installed).
-
-    The reporter is always called from worker threads, so it must only
-    put things on a queue - never touch Tkinter directly.
-    """
-
     if _reporter:
         try:
             _reporter(kind, text, done, total)
@@ -88,9 +82,6 @@ def report(stage, done=None, total=None):
 
 
 def log(msg):
-    """Print to stdout (when it exists - PyInstaller --noconsole kills it)
-    and forward to the GUI log."""
-
     line = "[Blemm] " + str(msg)
 
     if sys.stdout is not None:
@@ -124,8 +115,8 @@ def file_sha1(p):
 
 
 def _open(url):
-    """Open a URL. If certificate verification fails (broken/expired
-    local cert store, wrong system clock), retry once without strict
+    """Open a URL. If certificate verification fails (broken cert
+    store / wrong system clock), retry once without strict
     verification so a single bad chain can't block the launcher."""
 
     req = urllib.request.Request(
@@ -228,8 +219,6 @@ def _required_java(vid):
 
 
 def _system_java_major():
-    """Return the major version of the `java` on PATH, or None."""
-
     try:
         exe = "java.exe" if os_name() == "windows" else "java"
 
@@ -271,8 +260,8 @@ def java_bin_for(version_id, major=None):
     except Exception:
         major_int = None
 
-    # Only trust the system java if it exists AND is new enough
-    # for the Minecraft version being launched.
+    # Only trust the system java if it exists AND is new enough for
+    # the Minecraft version being launched.
 
     if shutil.which(exe) and major_int is not None:
         sysmaj = _system_java_major()
@@ -388,7 +377,13 @@ def resolve_version(version_id, m):
 
 
 def load_version_json(vid, m):
-    """Load a version JSON and resolve inheritsFrom-style parents."""
+    """Load a version JSON and resolve inheritsFrom-style parents.
+
+    If the version folder contains its OWN jar (versions/<vid>/<vid>.jar
+    - the way OptiFine standalone versions and custom/hack clients are
+    distributed), that jar REPLACES the vanilla client jar and no
+    vanilla jar is downloaded for it.
+    """
 
     path = os.path.join(GAME_DIR, "versions", vid, vid + ".json")
 
@@ -445,24 +440,42 @@ def load_version_json(vid, m):
         vj["_java_major"] = vj.get("javaVersion", {}).get("majorVersion")
         vj["_vanilla_id"] = vid
 
-    report("Downloading game files...", 5, 100)
+    # --------------------------------------------------------
+    # Which jar is the actual game jar?
+    # --------------------------------------------------------
+    # A version folder with its own <id>.jar (OptiFine standalone
+    # versions, imported hack clients) replaces the vanilla client
+    # jar entirely. Otherwise the vanilla/parent client jar is used
+    # (Forge/Fabric version folders contain only the JSON).
 
-    d = vj.get("downloads", {}).get("client")
+    own_jar = os.path.join(GAME_DIR, "versions", vid, vid + ".jar")
 
-    if not d:
-        raise RuntimeError(
-            "version JSON for '" + str(vid) + "' has no client download "
-            "(its parent version may be missing or corrupt)"
+    if os.path.isfile(own_jar):
+        vj["_client_jar"] = own_jar
+
+        report("Using custom client jar: " + vid + ".jar", 5, 100)
+
+    else:
+        d = vj.get("downloads", {}).get("client")
+
+        if not d:
+            raise RuntimeError(
+                "version JSON for '" + str(vid) + "' has no client download "
+                "(its parent version may be missing or corrupt)"
+            )
+
+        report("Downloading game files...", 5, 100)
+
+        jar = os.path.join(
+            GAME_DIR,
+            "versions",
+            vj["_vanilla_id"],
+            vj["_vanilla_id"] + ".jar"
         )
 
-    jar = os.path.join(
-        GAME_DIR,
-        "versions",
-        vj["_vanilla_id"],
-        vj["_vanilla_id"] + ".jar"
-    )
+        download(d["url"], jar, d.get("sha1"))
 
-    download(d["url"], jar, d.get("sha1"))
+        vj["_client_jar"] = jar
 
     return vj
 
@@ -683,8 +696,6 @@ def _jar_names(path):
 
 
 def looks_like_optifine(path):
-    """Heuristic OptiFine detection - filename first, contents second."""
-
     name = os.path.basename(path).lower()
 
     if not name.endswith(".jar"):
@@ -705,9 +716,6 @@ def looks_like_optifine(path):
 
 
 def _is_optifine_installer(path):
-    """Distinguish the official OptiFine installer JAR from a plain
-    OptiFine mod JAR."""
-
     names = _jar_names(path)
 
     if any(n.startswith("optifine/Installer") for n in names):
@@ -720,12 +728,6 @@ def _is_optifine_installer(path):
 
 
 def find_optifine_jars():
-    """Find ACTIVE OptiFine JARs in the CURRENT instance's mods folder.
-
-    Files renamed to <name>.jar.disabled while OptiFine is switched
-    off are ignored - they are restored automatically after a launch.
-    """
-
     mods_dir = os.path.join(GAME_DIR, "mods")
 
     if not os.path.isdir(mods_dir):
@@ -746,12 +748,6 @@ def find_optifine_jars():
 
 
 def _optifine_detected_version(path):
-    """Pull the Minecraft version out of an OptiFine filename, or None.
-
-    OptiFine files are named like 'OptiFine_1.20.1_HD_U_I6.jar'
-    or 'preview_OptiFine_1.20.1_HD_U_I6_pre1.jar'.
-    """
-
     m = re.search(
         r"([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
         os.path.basename(path)
@@ -769,9 +765,6 @@ def install_optifine(installer_jar, version_id=None):
       and placed in mods/. If extraction fails, the installer itself
       is copied - Forge can load OptiFine installer JARs directly
       from mods/.
-
-    `version_id` is the instance's Minecraft version, used to catch
-    obvious version mismatches before they crash the game.
     """
 
     if not installer_jar:
@@ -801,7 +794,6 @@ def install_optifine(installer_jar, version_id=None):
     if not out_name.lower().endswith(".jar"):
         out_name += ".jar"
 
-    # Sanity check: OptiFine is Minecraft-version specific.
     of_ver = _optifine_detected_version(src)
 
     if of_ver and version_id:
@@ -823,13 +815,9 @@ def install_optifine(installer_jar, version_id=None):
         return out
 
     if not _is_optifine_installer(src):
-        # Plain mod JAR - just copy it.
         shutil.copy2(src, out)
         log("OptiFine mod JAR copied to mods: " + out)
         return out
-
-    # Official installer JAR: run its built-in 'extract' command to
-    # get the actual OptiFine mod JAR out of it.
 
     work = tempfile.mkdtemp(prefix="blemm_optifine_")
 
@@ -852,8 +840,6 @@ def install_optifine(installer_jar, version_id=None):
         ]
 
         if r.returncode == 0 and jars:
-            # Prefer the biggest jar - the extracted OptiFine jar is
-            # substantially larger than anything else it drops.
             jars.sort(key=lambda f: os.path.getsize(os.path.join(work, f)))
 
             source = os.path.join(work, jars[-1])
@@ -866,8 +852,7 @@ def install_optifine(installer_jar, version_id=None):
 
         log(
             "OptiFine installer 'extract' step didn't produce a JAR - "
-            "copying the installer into mods/ instead (Forge can load "
-            "installed OptiFine JARs directly)."
+            "copying the installer into mods/ instead."
         )
 
     except Exception as e:
@@ -879,8 +864,6 @@ def install_optifine(installer_jar, version_id=None):
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
-    # Fallback: the installer JAR itself works as a Forge mod, and
-    # for vanilla instances launch() puts it on the classpath whole.
     shutil.copy2(src, out)
 
     log("OptiFine installed (as installer JAR): " + out)
@@ -889,12 +872,6 @@ def install_optifine(installer_jar, version_id=None):
 
 
 def _temp_disable_optifine():
-    """Rename OptiFine JARs to <name>.jar.disabled for one launch.
-
-    NOTHING is ever deleted. The caller must pass the returned list
-    to _restore_optifine(), which must run inside a finally block.
-    """
-
     disabled = []
 
     for jar in find_optifine_jars():
@@ -912,8 +889,6 @@ def _temp_disable_optifine():
 
 
 def _restore_optifine(disabled):
-    """Undo _temp_disable_optifine(). Runs even if Minecraft crashed."""
-
     for dp, orig in disabled:
         try:
             if os.path.exists(dp):
@@ -1217,13 +1192,9 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
     """Launch Minecraft.
 
     `optifine` is a BOOLEAN: whether OptiFine should be ACTIVE for
-    this launch. Installing OptiFine is handled separately by
-    install_optifine().
-
-    When optifine is False, OptiFine JARs in mods/ are renamed to
-    <name>.jar.disabled for the duration of the launch. They are
-    ALWAYS restored afterwards - including when Minecraft crashes -
-    because the game runs inside a try/finally.
+    this launch. When it's False, OptiFine JARs in mods/ are renamed
+    to <name>.jar.disabled for the launch and ALWAYS restored after,
+    even if the game crashes.
     """
 
     m = manifest()
@@ -1234,7 +1205,7 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
 
     java = java_bin_for(vid, vj.get("_java_major"))
 
-    vanilla_jar = os.path.join(
+    client_jar = vj.get("_client_jar") or os.path.join(
         GAME_DIR,
         "versions",
         vj["_vanilla_id"],
@@ -1243,8 +1214,8 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
 
     classpath, natives_dir = install_libraries(vj)
 
-    if os.path.exists(vanilla_jar):
-        classpath.insert(0, vanilla_jar)
+    if os.path.exists(client_jar):
+        classpath.insert(0, client_jar)
 
     asset_id = install_assets(vj)
 
@@ -1269,13 +1240,8 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
     loader_kind = _detect_loader(vj)
 
     # --------------------------------------------------------
-    # AUTH (TLauncher-style offline "trick")
+    # AUTH (TLauncher-style offline "trick" to avoid demo mode)
     # --------------------------------------------------------
-    # Modern Minecraft (~1.19.4+) treats a zero/legacy access token
-    # as a demo account and drops you into the demo world. Passing a
-    # NON-ZERO fake token plus user type 'msa' makes the client
-    # behave like a normal paid offline account. No servers are
-    # contacted, nothing is validated - it's cosmetic to the client.
 
     player_uuid = str(
         uuid.uuid3(uuid.NAMESPACE_OID, "offline:" + username)
@@ -1324,7 +1290,7 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
 
         "${library_directory}": os.path.abspath(LIBS),
 
-        "${primary_jar}": os.path.abspath(vanilla_jar),
+        "${primary_jar}": os.path.abspath(client_jar),
 
         "${resolution_width}": "854",
         "${resolution_height}": "480"
@@ -1368,7 +1334,6 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
             )
 
         elif loader_kind in ("forge", "neoforge"):
-            # OptiFine sits in mods/ and the loader picks it up.
             log(
                 "OptiFine will be loaded by "
                 + ("Forge" if loader_kind == "forge" else "NeoForge")
@@ -1376,11 +1341,7 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
             )
 
         else:
-            # VANILLA instance: TLauncher-style launchwrapper boot.
-            # Vanilla ignores the mods/ folder, so we load OptiFine
-            # the way the official OptiFine version profile does: boot
-            # through launchwrapper with the OptiFine tweaker, with
-            # the OptiFine JAR on the classpath.
+            # VANILLA instance: launchwrapper boot so mods/ is honored.
 
             log(
                 "Vanilla instance: loading OptiFine through "
@@ -1451,11 +1412,10 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
         + " (Java " + str(vj.get("_java_major") or _required_java(vid)) + ")..."
     )
 
-    report("Starting Minecraft...", 99, 100)
+    if os.path.basename(vid) != vid:
+        pass
 
-    # OptiFine JARs are only hidden for the duration of the game
-    # process, and the restore in `finally` runs even if the game
-    # crashes or launching raises.
+    report("Starting Minecraft...", 99, 100)
 
     disabled = [] if optifine else _temp_disable_optifine()
 
