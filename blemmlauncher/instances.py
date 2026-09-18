@@ -49,7 +49,6 @@ def _fetch_json(url):
         txt = str(e)
 
         if "CERTIFICATE_VERIFY_FAILED" in txt or "certificate" in txt.lower():
-            # Broken cert store / wrong system clock. Retry unverified.
             ctx = ssl._create_unverified_context()
 
             with urllib.request.urlopen(
@@ -80,10 +79,6 @@ def _download(url, dest):
         txt = str(e)
 
         if "CERTIFICATE_VERIFY_FAILED" in txt or "certificate" in txt.lower():
-            # Certificate problems (an expired/unknown chain, often a
-            # wrong system clock) shouldn't block a game download.
-            # Retry once with verification disabled.
-
             ctx = ssl._create_unverified_context()
 
             with urllib.request.urlopen(
@@ -183,9 +178,9 @@ def delete(name):
 
 
 def use(name, core):
-    """Point core at this instance. Everything (mods, libraries,
-    version JSONs, natives) is per-instance; assets and Java runtimes
-    are shared globally so they aren't re-downloaded per instance.
+    """Point core at this instance. Mods, libraries, version JSONs
+    and natives are per-instance; assets and Java runtimes are shared
+    globally so they aren't re-downloaded per instance.
     """
 
     d = instance_dir(name)
@@ -200,7 +195,281 @@ def use(name, core):
 
 
 # ============================================================
-# EXPORT / IMPORT
+# IMPORT CLIENT / MOD / CUSTOM VERSION
+# ============================================================
+
+def _sanitize_version_id(name):
+    """Turn an arbitrary file name into a valid version id."""
+
+    cleaned = re.sub(r'[<>:"/\\|?*\s]', "_", str(name)).strip("._ ")
+
+    return cleaned or "CustomClient"
+
+
+def _unique_instance_name(base):
+    base = base or "Client"
+    name = base
+    i = 1
+
+    while name in list_instances():
+        i += 1
+        name = base + " (" + str(i) + ")"
+
+    return name
+
+
+def _ensure_instance(name, version, loader, ram, username):
+    """Load an existing instance's cfg, or create it on the fly."""
+
+    if not isafe(name):
+        raise RuntimeError("bad instance name '" + str(name) + "'")
+
+    d = instance_dir(name)
+
+    os.makedirs(d, exist_ok=True)
+
+    for sub in ("mods", "resourcepacks", "shaderpacks", "saves"):
+        os.makedirs(os.path.join(d, sub), exist_ok=True)
+
+    cfgp = os.path.join(d, "blemm.json")
+
+    if os.path.exists(cfgp):
+        with open(cfgp, encoding="utf-8") as f:
+            return json.load(f)
+
+    cfg = {
+        "name": name,
+        "version": version,
+        "loader": loader,
+        "loader_build": None,
+        "ram": ram,
+        "username": username,
+        "optifine": False
+    }
+
+    with open(cfgp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+
+    return cfg
+
+
+def inspect_client_file(path):
+    """Classify a file the user wants to import.
+
+    Returns:
+      'version_json' - a Minecraft version JSON (custom client folder,
+                       TLauncher-style clients, OptiFine standalone)
+      'mod'          - a loader mod JAR (most hack clients: Meteor,
+                       Wurst, LiquidBounce...) or an OptiFine JAR
+      'client_jar'   - a bare custom client JAR that replaces the
+                       vanilla client.jar entirely
+      None           - unrecognizable
+    """
+
+    from . import core
+
+    p = str(path).lower()
+
+    if p.endswith(".json"):
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return None
+
+        if isinstance(data, dict) and (
+            "inheritsFrom" in data
+            or "mainClass" in data
+            or "id" in data
+        ):
+            return "version_json"
+
+        return None
+
+    if p.endswith(".jar"):
+        if core.looks_like_optifine(path):
+            return "mod"
+
+        if core.detect_kind(path) == "mod":
+            return "mod"
+
+        return "client_jar"
+
+    return None
+
+
+def import_client(path, instance_name=None, mc_version=None,
+                 loader=None, ram="4G", username="Blemm"):
+    """Import a hack client / custom client / mod into an instance.
+
+    instance_name: an EXISTING instance to import into; when None a
+    new instance is created (named after the file, with a unique
+    suffix if the name is taken).
+
+    mc_version: the Minecraft version to base things on ('release'
+    works too - resolved through the Mojang manifest).
+
+    loader: for mod JARs going into a NEW instance (forge/fabric/
+    neoforge, or None for vanilla).
+
+    Returns (instance_name, description_of_what_happened).
+    """
+
+    from . import core
+
+    src = os.path.abspath(path)
+
+    if not os.path.isfile(src):
+        raise RuntimeError("file not found: " + src)
+
+    base = os.path.splitext(os.path.basename(src))[0]
+
+    kind = inspect_client_file(src)
+
+    if kind is None:
+        raise RuntimeError(
+            "unsupported file - use a .jar or a Minecraft version .json"
+        )
+
+    def _resolve(mc):
+        if not mc:
+            raise RuntimeError(
+                "a Minecraft version is required - pick one in the "
+                "import dialog"
+            )
+
+        return core.resolve_version(mc, core.manifest())
+
+    # ---------- 1) version JSON from a versions/ folder ----------
+    # (TLauncher-style custom clients, OptiFine standalone versions...)
+
+    if kind == "version_json":
+        with open(src, encoding="utf-8") as f:
+            vj = json.load(f)
+
+        vid = _sanitize_version_id(vj.get("id") or base)
+
+        if instance_name:
+            name = instance_name
+        else:
+            name = _unique_instance_name(base)
+
+        cfg = _ensure_instance(name, vid, None, ram, username)
+
+        d = instance_dir(name)
+        vdest = os.path.join(d, "versions", vid)
+
+        os.makedirs(vdest, exist_ok=True)
+
+        # JSON (under the sanitized id so load_version_json finds it)
+        shutil.copy2(src, os.path.join(vdest, vid + ".json"))
+
+        # The matching client jar, if the user selected the json from
+        # an existing versions/<x>/ folder.
+        srcdir = os.path.dirname(src)
+        jar = None
+
+        for cand in (vid + ".jar", base + ".jar"):
+            jp = os.path.join(srcdir, cand)
+
+            if os.path.isfile(jp):
+                jar = jp
+                break
+
+        if jar:
+            shutil.copy2(jar, os.path.join(vdest, vid + ".jar"))
+
+        cfg["version"] = vid
+        cfg["loader"] = None
+
+        save_cfg(name, cfg)
+
+        msg = "custom version '" + vid + "' imported"
+        msg += " (client jar included)" if jar else ""
+
+        return name, msg
+
+    # ---------- 2) mod JAR (hack clients that are mods) ----------
+
+    if kind == "mod":
+        if instance_name:
+            name = instance_name
+            cfg = _ensure_instance(name, None, None, ram, username)
+        else:
+            mv = _resolve(mc_version)
+            name = _unique_instance_name(base)
+            cfg = _ensure_instance(name, mv, loader, ram, username)
+
+        d = instance_dir(name)
+
+        core.set_game_dir(
+            d,
+            assets_dir=SHARED_ASSETS,
+            tools_dir=SHARED_TOOLS
+        )
+
+        mods_dir = os.path.join(d, "mods")
+
+        os.makedirs(mods_dir, exist_ok=True)
+
+        shutil.copy2(src, os.path.join(mods_dir, os.path.basename(src)))
+
+        mod_name = os.path.basename(src)
+
+        if core.looks_like_optifine(src):
+            cfg["optifine"] = True
+
+        save_cfg(name, cfg)
+
+        return name, "installed into mods/: " + mod_name
+
+    # ---------- 3) bare custom client JAR (hacked client) -------
+    # A jar that REPLACES the vanilla client.jar. We wrap it in an
+    # OptiFine-style version folder: versions/<id>/<id>.jar plus a
+    # JSON inheriting from the vanilla version, so everything (java,
+    # libraries, assets, mainClass) resolves automatically.
+
+    mv = _resolve(mc_version)
+    vid = _sanitize_version_id(base)
+
+    if instance_name:
+        name = instance_name
+    else:
+        name = _unique_instance_name(base)
+
+    cfg = _ensure_instance(name, vid, None, ram, username)
+
+    d = instance_dir(name)
+    vdest = os.path.join(d, "versions", vid)
+
+    os.makedirs(vdest, exist_ok=True)
+
+    shutil.copy2(src, os.path.join(vdest, vid + ".jar"))
+
+    vjson = {
+        "id": vid,
+        "inheritsFrom": mv,
+        "type": "release",
+        "releaseTime": "2024-01-01T00:00:00+00:00",
+        "time": "2024-01-01T00:00:00+00:00",
+    }
+
+    with open(os.path.join(vdest, vid + ".json"), "w", encoding="utf-8") as f:
+        json.dump(vjson, f, indent=2)
+
+    cfg["version"] = vid
+    cfg["loader"] = None
+
+    save_cfg(name, cfg)
+
+    return (
+        name,
+        "custom client '" + vid + "' imported (based on Minecraft " + mv + ")"
+    )
+
+
+# ============================================================
+# EXPORT / IMPORT (whole instances)
 # ============================================================
 
 def export(name, dest_zip):
@@ -215,7 +484,6 @@ def export(name, dest_zip):
                 os.sep + "libraries" in root
                 or os.sep + "natives" in root
                 or os.sep + "log-configs" in root
-                or os.sep + "versions" in root
             ):
                 continue
 
@@ -298,7 +566,6 @@ def _java(mc_version):
 
 
 def _version_installed(core, vid):
-    """True if versions/<vid>/<vid>.json exists for this instance."""
     p = os.path.join(
         core.GAME_DIR,
         "versions",
@@ -310,13 +577,11 @@ def _version_installed(core, vid):
 
 def install_fabric(mc_version):
     """Install Fabric for this instance. RETURNS the installed version
-    id (like 'fabric-loader-0.16.x-1.21.1') so the caller can launch
-    the Fabric version instead of vanilla.
+    id (like 'fabric-loader-0.16.x-1.21.1').
     """
 
     from . import core
 
-    # Fast path: already installed for this instance?
     existing = glob.glob(
         os.path.join(
             core.GAME_DIR,
@@ -404,11 +669,6 @@ def install_fabric(mc_version):
 
 
 def _neoforge_series(mc_version):
-    """Compute the NeoForge version series from a Minecraft version.
-
-    1.20.1 -> '20.1', 1.21.4 -> '21.4', 1.21 -> '21.0' etc.
-    """
-
     m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?$", str(mc_version))
 
     if not m:
@@ -421,14 +681,12 @@ def _neoforge_series(mc_version):
 
 
 def install_neoforge(mc_version, build=None):
-    """Install NeoForge for this instance. RETURNS the installed version
-    id (like 'neoforge-21.1.95') so the caller launches the modded
-    version, not vanilla.
+    """Install NeoForge for this instance. RETURNS the installed
+    version id (like 'neoforge-21.1.95').
     """
 
     from . import core
 
-    # Fast path: known build already installed?
     if build and _version_installed(core, "neoforge-" + str(build)):
         return "neoforge-" + str(build)
 
@@ -471,7 +729,6 @@ def install_neoforge(mc_version, build=None):
 
         build = cands[0]
 
-    # Fast path once more with the resolved build.
     if _version_installed(core, "neoforge-" + str(build)):
         return "neoforge-" + str(build)
 
@@ -601,8 +858,6 @@ def _modrinth_project_type(ptype):
 
 
 def modrinth_search(query, mc_version, loader=None, project_type="mod"):
-    """Search Modrinth for projects compatible with a Minecraft version."""
-
     pt = _modrinth_project_type(project_type)
 
     facets = [
@@ -635,13 +890,7 @@ def modrinth_search(query, mc_version, loader=None, project_type="mod"):
 
 
 def modrinth_install(project_id, mc_version, loader=None, project_type="mod"):
-    """Download the best compatible file into the CURRENT instance.
-
-    The destination depends on the project type: mods/ for mods,
-    shaderpacks/ for shaders, resourcepacks/ for resource packs
-    (which are also auto-enabled). core.GAME_DIR must already point
-    at the right instance (the GUI handles that).
-    """
+    """Download the best compatible file into the CURRENT instance."""
 
     from . import core
 
@@ -650,9 +899,6 @@ def modrinth_install(project_id, mc_version, loader=None, project_type="mod"):
     params = {
         "game_versions": json.dumps([str(mc_version)], separators=(",", ":")),
     }
-
-    # Loader filtering only makes sense for mods; shaders/packs list
-    # 'iris'/'optifine'/'minecraft' as loaders, so don't filter there.
 
     if pt == "mod" and loader:
         params["loaders"] = json.dumps(
