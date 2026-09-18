@@ -1,9 +1,9 @@
 """BlemmLauncher core - versions, Forge, OptiFine, mods, packs, Java, progress."""
 import socket
 socket.setdefaulttimeout(25)
-import hashlib, json, os, platform, shutil, subprocess, sys, tempfile, urllib.request, uuid, zipfile
+import hashlib, json, os, platform, shutil, subprocess, sys, tempfile, urllib.request, uuid, zipfile, glob
 
-LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.1.2"
+LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.3.0"
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 LIB_BASE = "https://libraries.minecraft.net/"
 RESOURCE_BASE = "https://resources.download.minecraft.net/"
@@ -11,7 +11,6 @@ FORGE_PROMOS = "https://files.minecraftforge.net/net/minecraftforge/forge/promot
 FORGE_MAVEN = "https://maven.minecraftforge.net"
 ADOPTIUM_API = "https://api.adoptium.net/v3/binary/latest/{major}/ga/windows/x64/jdk/hotspot/normal/eclipse"
 
-# Browser-style UA: Mojang's piston-data CDN 403s unfamiliar/robotic user agents.
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
               f"{LAUNCHER_NAME}/{LAUNCHER_VERSION} (contact: local)")
 
@@ -70,11 +69,23 @@ def maven_path(name):
     return f"{g.replace('.', '/')}/{aid}/{ver}/{aid}-{ver}{'-' + ext[0] if ext else ''}.jar"
 
 # ---------- Java ----------
+def _required_java(vid):
+    try:
+        parts = [int(x) for x in vid.split(".") if x.isdigit()]
+        major = parts[1] if len(parts) > 1 else 0
+        minor = parts[2] if len(parts) > 2 else 0
+        if major > 20 or (major == 20 and minor >= 5): return "21"
+        if major >= 18: return "17"
+        if major == 17: return "16"
+        return "8"
+    except Exception:
+        return "17"
+
 def java_bin_for(version_id, major=None):
     exe = "java.exe" if os_name() == "windows" else "java"
     if shutil.which(exe): return exe
     if major is None:
-        major = "21" if _mc_major(version_id) >= 21 else "17"
+        major = _required_java(version_id)
     jdir = os.path.join(TOOLS, f"java-{major}")
     jbin = os.path.join(jdir, "bin", exe)
     if not os.path.exists(jbin):
@@ -236,8 +247,9 @@ def install_optifine(installer_jar, with_forge=False):
                        cwd=work, capture_output=True)
     jars = [f for f in os.listdir(work) if f.endswith(".jar")]
     if r.returncode != 0 or not jars:
-        print(r.stdout.decode(errors="replace"), r.stderr.decode(errors="replace"))
-        raise RuntimeError("OptiFine extract failed - is that the official installer jar?")
+        outp = ((r.stdout or b"") + (r.stderr or b"")).decode(errors="replace")
+        raise RuntimeError("OptiFine extract failed - is that the official installer jar?\n"
+                           "--- output ---\n" + outp[-800:])
     shutil.move(os.path.join(work, jars[0]), out)
     log(f"OptiFine ready: {out}" + (" (installed as Forge mod)" if with_forge else ""))
     return out
@@ -245,9 +257,13 @@ def install_optifine(installer_jar, with_forge=False):
 # ---------- Forge ----------
 def install_forge(mc_version, build=None):
     if build in (None, "auto", "", "recommended", "latest"):
-        promos = fetch_json(FORGE_PROMOS)["promos"]
-        build = promos.get(f"{mc_version}-recommended") or promos.get(f"{mc_version}-latest")
-        if not build: raise RuntimeError(f"No Forge build for {mc_version}")
+        try:
+            promos = fetch_json(FORGE_PROMOS)["promos"]
+            build = promos.get(f"{mc_version}-recommended") or promos.get(f"{mc_version}-latest")
+        except Exception as e:
+            build = None
+        if not build:
+            raise RuntimeError(f"No Forge build found for {mc_version} (promos fetch failed)")
     vid = f"{mc_version}-forge-{build}"
     if os.path.exists(os.path.join(GAME_DIR, "versions", vid, vid + ".json")):
         log(f"Forge {vid} already installed."); return vid
@@ -255,15 +271,26 @@ def install_forge(mc_version, build=None):
     load_version_json(resolve_version(mc_version, m), m)
     os.makedirs(TOOLS, exist_ok=True)
     installer = os.path.join(TOOLS, f"forge-{vid}-installer.jar")
-    download(f"{FORGE_MAVEN}/net/minecraftforge/forge/{mc_version}-{build}/forge-{mc_version}-{build}-installer.jar", installer)
+    ilurl = f"{FORGE_MAVEN}/net/minecraftforge/forge/{mc_version}-{build}/forge-{mc_version}-{build}-installer.jar"
+    report("Downloading Forge installer...")
+    download(ilurl, installer)
     report("Installing Forge (running official installer)...")
     java = shutil.which("java") or java_bin_for(mc_version)
     r = subprocess.run([java, "-jar", installer, "--installClient"], cwd=GAME_DIR, capture_output=True)
-    if not os.path.exists(os.path.join(GAME_DIR, "versions", vid, vid + ".json")):
-        print(r.stdout.decode(errors="replace"), r.stderr.decode(errors="replace"))
-        raise RuntimeError("Forge install failed - see output above.")
-    log(f"Forge installed: {vid}")
-    return vid
+    # the installer names the version folder itself - find what it ACTUALLY created
+    # (it doesn't always match our guess: capitalization/build string differ between eras)
+    matches = [p for p in glob.glob(os.path.join(GAME_DIR, "versions", f"{mc_version}*forge*"))
+               if os.path.exists(os.path.join(p, os.path.basename(p) + ".json"))]
+    matches.sort(key=os.path.getmtime, reverse=True)
+    if not matches:
+        outp = ((r.stdout or b"") + (r.stderr or b"")).decode(errors="replace")
+        raise RuntimeError(
+            f"Forge install failed (installer exit code {r.returncode}).\n"
+            f"--- installer output ---\n{outp[-1500:]}"
+        )
+    found = os.path.basename(matches[0])
+    log(f"Forge installed: {found}")
+    return found
 
 # ---------- content: mods / packs / shaders ----------
 def detect_kind(path):
@@ -280,7 +307,6 @@ def detect_kind(path):
     return None
 
 def add_content_auto(paths, kind=None):
-    """Import files without terminal prompts. kind: 'mod'|'resourcepack'|'shaderpack'|None(auto)."""
     folders = {"mod": "mods", "resourcepack": "resourcepacks", "shaderpack": "shaderpacks"}
     installed = []
     for p in paths:
@@ -302,6 +328,12 @@ def enable_resourcepack(filename):
         lines = open(opts_path, encoding="utf-8").read().splitlines()
     lines = [l for l in lines if not l.startswith("resourcePacks:")] + [entry]
     open(opts_path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+
+# ---------- instance support ----------
+def set_game_dir(path):
+    global GAME_DIR, ASSETS, LIBS, TOOLS
+    GAME_DIR = path
+    LIBS = os.path.join(GAME_DIR, "libraries")
 
 # ---------- launch ----------
 def subst(s, subs):
@@ -331,11 +363,10 @@ def launch(version_id, username="Blemm", ram="2G", optifine=None):
          "-Dminecraft.launcher.brand=${launcher_name}",
          "-Dminecraft.launcher.version=${launcher_version}", "-cp", "${classpath}"]
 
-    # ---- OptiFine policy: Forge-only ----
-    forge_active = "-forge-" in vid
+    forge_active = "-forge-" in vid.lower() or "neoforge" in vid.lower()
     if optifine:
         if forge_active:
-            of_jar = install_optifine(optifine, with_forge=True)   # goes in mods/
+            of_jar = install_optifine(optifine, with_forge=True)
             log(f"OptiFine enabled as Forge mod: {of_jar}")
         else:
             log("OptiFine selected but Forge is OFF - skipping OptiFine.")
@@ -364,7 +395,17 @@ def launch(version_id, username="Blemm", ram="2G", optifine=None):
         cmd.append(f"-Dlog4j.configurationFile={os.path.abspath(lf)}")
     cmd += resolve_arglist(jvm_args, subs) + [vj["mainClass"]] + resolve_arglist(game_args, subs)
     os.makedirs(GAME_DIR, exist_ok=True)
-    log(f"Launching {vid} as {username} (Java {vj.get('_java_major') or '?'})...")
+    log(f"Launching {vid} as {username} (Java {vj.get('_java_major') or _required_java(vid)})...")
     report("Starting Minecraft...", 99, 100)
-    subprocess.run(cmd, cwd=GAME_DIR)
+
+    result = subprocess.run(cmd, cwd=GAME_DIR, capture_output=True)
     report("Minecraft closed.", 100, 100)
+    if result.returncode != 0:
+        out = (result.stdout or b"") + (result.stderr or b"")
+        tail = out.decode(errors="replace").strip()[-1200:]
+        raise RuntimeError(
+            f"Minecraft crashed instantly (exit code {result.returncode}).\n"
+            f"--- last output ---\n{tail}\n"
+            f"-------------------\n"
+            f"If this mentions 'UnsupportedClassVersionError', the Java version is wrong for this Minecraft."
+        )
