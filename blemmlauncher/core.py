@@ -2,51 +2,22 @@
 """BlemmLauncher core - versions, Forge, mods, packs, Java, progress."""
 import socket
 socket.setdefaulttimeout(25)
-
-import hashlib
-import json
-import os
-import platform
-import shutil
-import subprocess
-import sys
-import tempfile
-import urllib.request
-import uuid
-import zipfile
-import glob
-
+import hashlib, json, os, platform, shutil, subprocess, sys, tempfile, urllib.request, uuid, zipfile, glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-
 LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.3.0"
-
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 LIB_BASE = "https://libraries.minecraft.net/"
 RESOURCE_BASE = "https://resources.download.minecraft.net/"
 FORGE_PROMOS = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
 FORGE_MAVEN = "https://maven.minecraftforge.net"
+ADOPTIUM_API = "https://api.adoptium.net/v3/binary/latest/{major}/ga/windows/x64/jdk/hotspot/normal/eclipse"
 
-ADOPTIUM_API = (
-    "https://api.adoptium.net/v3/binary/latest/"
-    "{major}/ga/windows/x64/jdk/hotspot/normal/eclipse"
-)
-
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    f"{LAUNCHER_NAME}/{LAUNCHER_VERSION} (contact: local)"
-)
-
-
-# ---------- directories ----------
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              f"{LAUNCHER_NAME}/{LAUNCHER_VERSION} (contact: local)")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-GAME_DIR = os.environ.get(
-    "BLEMM_DIR",
-    os.path.join(ROOT, "minecraft")
-)
-
+GAME_DIR = os.environ.get("BLEMM_DIR", os.path.join(ROOT, "minecraft"))
 ASSETS = os.path.join(GAME_DIR, "assets")
 LIBS = os.path.join(GAME_DIR, "libraries")
 TOOLS = os.path.join(GAME_DIR, "tools")
@@ -85,11 +56,9 @@ def os_name():
 
 def file_sha1(p):
     h = hashlib.sha1()
-
     with open(p, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 16), b""):
             h.update(chunk)
-
     return h.hexdigest()
 
 
@@ -98,21 +67,17 @@ def _open(url):
         url,
         headers={"User-Agent": USER_AGENT}
     )
-
     return urllib.request.urlopen(req, timeout=25)
 
 
 def download(url, dest, sha1=None):
     dest = os.path.normpath(dest)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
 
-    os.makedirs(
-        os.path.dirname(dest),
-        exist_ok=True
-    )
-
-    if os.path.exists(dest):
-        if sha1 is None or file_sha1(dest) == sha1:
-            return
+    if os.path.exists(dest) and (
+        sha1 is None or file_sha1(dest) == sha1
+    ):
+        return
 
     tmp = dest + ".part"
 
@@ -120,7 +85,6 @@ def download(url, dest, sha1=None):
         try:
             with _open(url) as r, open(tmp, "wb") as f:
                 shutil.copyfileobj(r, f)
-
             break
 
         except Exception as e:
@@ -142,14 +106,10 @@ def fetch_json(url):
 
 def maven_path(name):
     g, aid, ver, *ext = name.split(":")
-
-    suffix = f"-{ext[0]}" if ext else ""
-
     return (
-        f"{g.replace('.', '/')}/"
-        f"{aid}/"
-        f"{ver}/"
-        f"{aid}-{ver}{suffix}.jar"
+        f"{g.replace('.', '/')}/{aid}/{ver}/"
+        f"{aid}-{ver}"
+        f"{'-' + ext[0] if ext else ''}.jar"
     )
 
 
@@ -182,11 +142,7 @@ def _required_java(vid):
 
 
 def java_bin_for(version_id, major=None):
-    exe = (
-        "java.exe"
-        if os_name() == "windows"
-        else "java"
-    )
+    exe = "java.exe" if os_name() == "windows" else "java"
 
     if shutil.which(exe):
         return exe
@@ -207,14 +163,10 @@ def java_bin_for(version_id, major=None):
 
     if not os.path.exists(jbin):
         report(
-            f"Downloading Java {major} "
-            "(one time, ~180 MB)..."
+            f"Downloading Java {major} (one time, ~180 MB)..."
         )
 
-        os.makedirs(
-            TOOLS,
-            exist_ok=True
-        )
+        os.makedirs(TOOLS, exist_ok=True)
 
         zpath = os.path.join(
             TOOLS,
@@ -245,9 +197,7 @@ def java_bin_for(version_id, major=None):
             for r, _, fs in os.walk(jdir):
                 for f in fs:
                     p = os.path.join(r, f)
-
                     st = os.stat(p)
-
                     os.chmod(
                         p,
                         st.st_mode | stat.S_IEXEC
@@ -258,10 +208,7 @@ def java_bin_for(version_id, major=None):
 
 def _mc_major(version_id):
     try:
-        return int(
-            version_id.split(".")[1]
-        )
-
+        return int(version_id.split(".")[1])
     except Exception:
         return 20
 
@@ -277,7 +224,7 @@ def manifest():
             if attempt == 3:
                 raise RuntimeError(
                     f"can't reach Mojang (attempt 3): {e}\n"
-                    "check internet / firewall / proxy, then retry"
+                    f"check internet / firewall / proxy, then retry"
                 ) from e
 
             log(
@@ -324,10 +271,7 @@ def resolve_version(version_id, m):
 
 
 def load_version_json(vid, m):
-    """
-    Load a version JSON and resolve Forge-style
-    inheritsFrom parents.
-    """
+    """Load a version JSON, resolving Forge-style inheritsFrom parents."""
 
     path = os.path.join(
         GAME_DIR,
@@ -344,14 +288,11 @@ def load_version_json(vid, m):
         )
 
         report("Downloading version info...")
+        download(vurl, path)
 
-        download(
-            vurl,
-            path
-        )
-
-    with open(path, encoding="utf-8") as f:
-        vj = json.load(f)
+    vj = json.load(
+        open(path, encoding="utf-8")
+    )
 
     if "inheritsFrom" in vj:
         parent = load_version_json(
@@ -372,11 +313,10 @@ def load_version_json(vid, m):
                 pj.get("game", [])
                 + cj.get("game", [])
             ),
-
             "jvm": (
                 pj.get("jvm", [])
                 + cj.get("jvm", [])
-            )
+            ),
         }
 
         vj.setdefault(
@@ -409,8 +349,7 @@ def load_version_json(vid, m):
 
     else:
         vj["_java_major"] = (
-            vj.get("javaVersion", {})
-            .get("majorVersion")
+            vj.get("javaVersion", {}).get("majorVersion")
         )
 
         vj["_vanilla_id"] = vid
@@ -511,7 +450,7 @@ def install_libraries(vj):
             else maven_path(lib["name"])
         )
 
-        if not rp or rp in seen:
+        if rp in seen or not rp:
             continue
 
         seen.add(rp)
@@ -526,9 +465,7 @@ def install_libraries(vj):
             if art
             else None
         ) or (
-            FORGE_MAVEN
-            + "/"
-            + rp
+            FORGE_MAVEN + "/" + rp
         )
 
         try:
@@ -558,16 +495,16 @@ def install_libraries(vj):
 
         classpath.append(jar)
 
-        classifier = (
-            lib.get("natives", {})
-            .get(os_name())
-        )
+        classifier = lib.get(
+            "natives",
+            {}
+        ).get(os_name())
 
         if classifier:
-            nart = (
-                dl.get("classifiers", {})
-                .get(classifier)
-            )
+            nart = dl.get(
+                "classifiers",
+                {}
+            ).get(classifier)
 
             if nart:
                 njar = os.path.join(
@@ -590,28 +527,23 @@ def install_libraries(vj):
                         if (
                             info.filename.startswith("META-INF/")
                             or n.endswith(
-                                (
-                                    ".sha1",
-                                    ".sha",
-                                    ".git"
-                                )
+                                (".sha1", ".sha", ".git")
                             )
                         ):
                             continue
 
                         if n:
-                            with z.open(info) as s:
-                                with open(
-                                    os.path.join(
-                                        natives_dir,
-                                        n
-                                    ),
-                                    "wb"
-                                ) as o:
-                                    shutil.copyfileobj(
-                                        s,
-                                        o
-                                    )
+                            with z.open(info) as s, open(
+                                os.path.join(
+                                    natives_dir,
+                                    n
+                                ),
+                                "wb"
+                            ) as o:
+                                shutil.copyfileobj(
+                                    s,
+                                    o
+                                )
 
     return classpath, natives_dir
 
@@ -619,9 +551,7 @@ def install_libraries(vj):
 # ---------- assets ----------
 
 def install_assets(vj):
-    """
-    Download all asset objects for this version.
-    """
+    """Download all asset objects for this version."""
 
     idx = vj.get("assetIndex")
 
@@ -643,13 +573,16 @@ def install_assets(vj):
         idx.get("sha1")
     )
 
-    with open(idp, encoding="utf-8") as f:
-        objects = json.load(f).get(
-            "objects",
-            {}
-        )
+    objects = json.load(
+        open(idp, encoding="utf-8")
+    ).get(
+        "objects",
+        {}
+    )
 
-    items = list(objects.items())
+    items = list(
+        objects.items()
+    )
 
     total = max(
         len(items),
@@ -660,13 +593,11 @@ def install_assets(vj):
 
     def _fetch(entry):
         name, obj = entry
-
         h = obj["hash"]
 
         try:
             download(
-                RESOURCE_BASE
-                + f"{h[:2]}/{h}",
+                RESOURCE_BASE + f"{h[:2]}/{h}",
                 os.path.join(
                     ASSETS,
                     "objects",
@@ -682,8 +613,7 @@ def install_assets(vj):
             return f"{name}: {e}"
 
     report(
-        "Downloading game assets "
-        "(biggest step, first time only)...",
+        "Downloading game assets (biggest step, first time only)...",
         0,
         total
     )
@@ -703,13 +633,9 @@ def install_assets(vj):
         for fut in as_completed(futures):
             done += 1
 
-            if (
-                done % 25 == 0
-                or done == total
-            ):
+            if done % 25 == 0 or done == total:
                 report(
-                    "Downloading game assets "
-                    "(biggest step, first time only)...",
+                    "Downloading game assets (biggest step, first time only)...",
                     done,
                     total
                 )
@@ -717,7 +643,9 @@ def install_assets(vj):
             err = fut.result()
 
             if err:
-                log(f"  ! {err}")
+                log(
+                    f"  ! {err}"
+                )
 
     return idx["id"]
 
@@ -725,11 +653,7 @@ def install_assets(vj):
 # ---------- Forge ----------
 
 def ensure_launcher_profile(game_dir):
-    """
-    Forge's installer expects a launcher_profiles.json.
-    BlemmLauncher uses its own private game directory,
-    so create a minimal profile file when necessary.
-    """
+    """Create the minimal launcher profile Forge expects."""
 
     lp = os.path.join(
         game_dir,
@@ -758,11 +682,6 @@ def ensure_launcher_profile(game_dir):
 
 
 def _forge_locally_processed(vj):
-    """
-    Check whether Forge's locally processed
-    client/server/universal jars exist.
-    """
-
     for lib in vj.get(
         "libraries",
         []
@@ -776,9 +695,11 @@ def _forge_locally_processed(vj):
         ):
             continue
 
-        art = (
-            lib.get("downloads", {})
-            .get("artifact")
+        art = lib.get(
+            "downloads",
+            {}
+        ).get(
+            "artifact"
         )
 
         if art and not os.path.exists(
@@ -819,12 +740,11 @@ def install_forge(mc_version, build=None):
 
         if not build:
             raise RuntimeError(
-                f"No Forge build found for {mc_version}"
+                f"No Forge build found for {mc_version} "
+                f"(promos fetch failed)"
             )
 
-    vid = (
-        f"{mc_version}-forge-{build}"
-    )
+    vid = f"{mc_version}-forge-{build}"
 
     existing = os.path.join(
         GAME_DIR,
@@ -835,19 +755,17 @@ def install_forge(mc_version, build=None):
 
     if os.path.exists(existing):
         try:
-            with open(
-                existing,
-                encoding="utf-8"
-            ) as f:
-                existing_json = json.load(f)
-
             if _forge_locally_processed(
-                existing_json
+                json.load(
+                    open(
+                        existing,
+                        encoding="utf-8"
+                    )
+                )
             ):
                 log(
                     f"Forge {vid} already installed."
                 )
-
                 return vid
 
         except Exception:
@@ -898,8 +816,7 @@ def install_forge(mc_version, build=None):
     )
 
     report(
-        "Installing Forge "
-        "(running official installer)..."
+        "Installing Forge (running official installer)..."
     )
 
     ensure_launcher_profile(
@@ -941,8 +858,7 @@ def install_forge(mc_version, build=None):
         if os.path.exists(
             os.path.join(
                 p,
-                os.path.basename(p)
-                + ".json"
+                os.path.basename(p) + ".json"
             )
         )
     ]
@@ -954,33 +870,34 @@ def install_forge(mc_version, build=None):
 
     if r.returncode != 0 or not matches:
         raise RuntimeError(
-            "Forge install failed "
+            f"Forge install failed "
             f"(installer exit code {r.returncode}).\n"
-            "--- installer output ---\n"
-            + outp[-1500:]
+            f"--- installer output ---\n"
+            f"{outp[-1500:]}"
         )
 
     found = os.path.basename(
         matches[0]
     )
 
-    with open(
-        os.path.join(
-            matches[0],
-            found + ".json"
-        ),
-        encoding="utf-8"
-    ) as f:
-        vj_check = json.load(f)
+    vj_check = json.load(
+        open(
+            os.path.join(
+                matches[0],
+                found + ".json"
+            ),
+            encoding="utf-8"
+        )
+    )
 
     if not _forge_locally_processed(
         vj_check
     ):
         raise RuntimeError(
-            "Forge installer exited OK but "
-            "its processors step didn't finish "
+            "Forge installer exited OK but its processors step didn't finish "
             "(the local client/server jars are missing).\n"
-            f"--- installer output ---\n{outp[-1500:]}"
+            f"--- installer output ---\n"
+            f"{outp[-1500:]}"
         )
 
     log(
@@ -1064,8 +981,7 @@ def add_content_auto(paths, kind=None):
         )
 
         installed.append(
-            f"{use_kind}: "
-            f"{os.path.basename(p)}"
+            f"{use_kind}: {os.path.basename(p)}"
         )
 
         if use_kind == "resourcepack":
@@ -1075,7 +991,7 @@ def add_content_auto(paths, kind=None):
 
     log(
         f"Imported {len(installed)} file(s): "
-        + ", ".join(installed)
+        f"{', '.join(installed)}"
     )
 
     return installed
@@ -1087,18 +1003,14 @@ def enable_resourcepack(filename):
         "options.txt"
     )
 
-    entry = (
-        f'resourcePacks:["file/{filename}"]'
-    )
-
+    entry = f'resourcePacks:["file/{filename}"]'
     lines = []
 
     if os.path.exists(opts_path):
-        with open(
+        lines = open(
             opts_path,
             encoding="utf-8"
-        ) as f:
-            lines = f.read().splitlines()
+        ).read().splitlines()
 
     lines = [
         l
@@ -1108,72 +1020,32 @@ def enable_resourcepack(filename):
 
     lines.append(entry)
 
-    with open(
+    open(
         opts_path,
         "w",
         encoding="utf-8"
-    ) as f:
-        f.write(
-            "\n".join(lines)
-            + "\n"
-        )
+    ).write(
+        "\n".join(lines) + "\n"
+    )
 
 
 # ---------- instance support ----------
 
 def set_game_dir(path):
-    """
-    Set the complete Minecraft instance directory.
+    global GAME_DIR, ASSETS, LIBS, TOOLS
 
-    All instance-specific folders are updated together so
-    mods, libraries, assets, Java tools, etc. stay inside
-    the selected instance.
-    """
-
-    global GAME_DIR
-    global ASSETS
-    global LIBS
-    global TOOLS
-
-    GAME_DIR = os.path.abspath(path)
-
+    GAME_DIR = path
     ASSETS = os.path.join(
         GAME_DIR,
         "assets"
     )
-
     LIBS = os.path.join(
         GAME_DIR,
         "libraries"
     )
-
     TOOLS = os.path.join(
         GAME_DIR,
         "tools"
-    )
-
-    os.makedirs(
-        GAME_DIR,
-        exist_ok=True
-    )
-
-    os.makedirs(
-        ASSETS,
-        exist_ok=True
-    )
-
-    os.makedirs(
-        LIBS,
-        exist_ok=True
-    )
-
-    os.makedirs(
-        TOOLS,
-        exist_ok=True
-    )
-
-    log(
-        f"Game directory set to: {GAME_DIR}"
     )
 
 
@@ -1187,19 +1059,14 @@ def subst(s, subs):
 
 
 def resolve_arglist(items, subs):
-    """
-    Resolve Minecraft arguments while respecting OS rules.
-
-    Quick Play arguments are removed because BlemmLauncher
-    performs a normal launch.
-    """
+    """Resolve Minecraft arguments while respecting OS rules."""
 
     out = []
 
     quick_play_options = {
         "--quickPlaySingleplayer",
         "--quickPlayMultiplayer",
-        "--quickPlayRealms"
+        "--quickPlayRealms",
     }
 
     for a in items:
@@ -1214,7 +1081,6 @@ def resolve_arglist(items, subs):
                 continue
 
             v = a["value"]
-
             values = (
                 v
                 if isinstance(v, list)
@@ -1246,14 +1112,6 @@ def launch(
     username="Blemm",
     ram="2G"
 ):
-    """
-    Launch Minecraft.
-
-    OptiFine is NOT automatically installed or managed.
-    Users can place their own compatible mods directly
-    into the instance's mods folder.
-    """
-
     m = manifest()
 
     vid = resolve_version(
@@ -1292,12 +1150,18 @@ def launch(
     )
 
     game_args = (
-        vj.get("arguments", {}).get("game")
+        vj.get(
+            "arguments",
+            {}
+        ).get("game")
         or vj["minecraftArguments"].split()
     )
 
     jvm_args = (
-        vj.get("arguments", {}).get("jvm")
+        vj.get(
+            "arguments",
+            {}
+        ).get("jvm")
         or [
             "-Djava.library.path=${natives_directory}",
             "-Dminecraft.launcher.brand=${launcher_name}",
@@ -1309,65 +1173,49 @@ def launch(
 
     subs = {
         "${auth_player_name}": username,
-
         "${auth_uuid}": str(
             uuid.uuid3(
                 uuid.NAMESPACE_OID,
                 "offline:" + username
             )
         ),
-
         "${auth_access_token}": "0",
         "${auth_session}": "0",
-
         "${user_type}": "legacy",
         "${user_properties}": "{}",
-
         "${version_name}": vid,
         "${version_type}": LAUNCHER_NAME,
-
         "${game_directory}": os.path.abspath(
             GAME_DIR
         ),
-
         "${assets_root}": os.path.abspath(
             ASSETS
         ),
-
         "${assets_index_name}": asset_id,
-
         "${game_assets}": os.path.join(
             ASSETS,
             "virtual",
             asset_id
         ),
-
         "${natives_directory}": os.path.abspath(
             natives_dir
         ),
-
         "${launcher_name}": LAUNCHER_NAME,
         "${launcher_version}": LAUNCHER_VERSION,
-
         "${classpath}": os.pathsep.join(
             classpath
         ),
-
         "${classpath_separator}": os.pathsep,
-
         "${library_directory}": os.path.abspath(
             LIBS
         ),
-
         "${primary_jar}": os.path.abspath(
             vanilla_jar
         ),
-
         "${clientid}": "0" * 32,
         "${auth_xuid}": "0",
-
         "${resolution_width}": "854",
-        "${resolution_height}": "480"
+        "${resolution_height}": "480",
     }
 
     cmd = [
@@ -1376,9 +1224,12 @@ def launch(
         f"-Xmx{ram}"
     ]
 
-    log_cfg = (
-        vj.get("logging", {})
-        .get("client", {})
+    log_cfg = vj.get(
+        "logging",
+        {}
+    ).get(
+        "client",
+        {}
     )
 
     if log_cfg:
@@ -1395,8 +1246,7 @@ def launch(
         )
 
         cmd.append(
-            "-Dlog4j.configurationFile="
-            + os.path.abspath(lf)
+            f"-Dlog4j.configurationFile={os.path.abspath(lf)}"
         )
 
     cmd += (
@@ -1413,24 +1263,6 @@ def launch(
 
     os.makedirs(
         GAME_DIR,
-        exist_ok=True
-    )
-
-    # Make sure the user's mod folders exist.
-    # BlemmLauncher does not download or modify OptiFine.
-    os.makedirs(
-        os.path.join(
-            GAME_DIR,
-            "mods"
-        ),
-        exist_ok=True
-    )
-
-    os.makedirs(
-        os.path.join(
-            GAME_DIR,
-            "shaderpacks"
-        ),
         exist_ok=True
     )
 
@@ -1463,21 +1295,18 @@ def launch(
             + (result.stderr or b"")
         )
 
-        tail = (
-            out.decode(
-                errors="replace"
-            )
-            .strip()[-1200:]
-        )
+        tail = out.decode(
+            errors="replace"
+        ).strip()[-1200:]
 
         raise RuntimeError(
-            "Minecraft crashed instantly "
+            f"Minecraft crashed instantly "
             f"(exit code {result.returncode}).\n"
-            "--- last output ---\n"
+            f"--- last output ---\n"
             f"{tail}\n"
-            "-------------------\n"
-            "If this mentions "
-            "'UnsupportedClassVersionError', "
-            "the Java version is wrong for this Minecraft."
+            f"-------------------\n"
+            f"If this mentions "
+            f"'UnsupportedClassVersionError', "
+            f"the Java version is wrong for this Minecraft."
         )
 ```
