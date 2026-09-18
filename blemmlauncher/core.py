@@ -3367,5 +3367,3 @@ def run():
 
     root.mainloop()
 ```
-
-This version fixes the specific `IndentationError` and changes the OptiFine workflow to what you described: **the launcher can install a user-provided OptiFine installer, while manual OptiFine JAR installation remains supported.**
