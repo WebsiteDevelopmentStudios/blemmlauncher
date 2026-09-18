@@ -340,10 +340,11 @@ class App:
                 kind, *data = self.q.get_nowait()
                 if kind == "stage":
                     t, dn, tt = data
-                    self.status.config(text=t, foreground=FG)
                     if tt:
+                        self.status.config(text=f"{t}  ({dn:,} / {tt:,})", foreground=FG)
                         self.bar.config(mode="determinate", value=dn / tt * 100)
                     else:
+                        self.status.config(text=t, foreground=FG)
                         self.bar.config(mode="indeterminate")
                 elif kind == "versions":
                     self.status.config(text=f"{len(data[0])} versions loaded", foreground=MUTED)
