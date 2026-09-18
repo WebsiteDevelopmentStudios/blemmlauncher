@@ -481,6 +481,8 @@ def launch(version_id, username="Blemm", ram="2G", optifine=None):
         "${library_directory}": os.path.abspath(LIBS),
         "${primary_jar}": os.path.abspath(vanilla_jar),
         "${clientid}": "0" * 32, "${auth_xuid}": "0",
+        "${resolution_width}": "854",
+        "${resolution_height}": "480",
     }
     cmd = [java, "-Xms512M", f"-Xmx{ram}"]
     log_cfg = vj.get("logging", {}).get("client", {})
