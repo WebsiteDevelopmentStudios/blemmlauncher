@@ -255,6 +255,19 @@ def install_optifine(installer_jar, with_forge=False):
     return out
 
 # ---------- Forge ----------
+def ensure_launcher_profile(game_dir):
+    """Forge's installer refuses to run --installClient unless it finds a
+    launcher_profiles.json in the target directory (it uses this to confirm
+    it's a real Minecraft directory it can register a profile in). Since
+    BlemmLauncher uses its own private game directory instead of the vanilla
+    launcher's, that file never exists on its own - so we create a minimal
+    valid one before invoking the installer."""
+    lp = os.path.join(game_dir, "launcher_profiles.json")
+    if not os.path.exists(lp):
+        os.makedirs(game_dir, exist_ok=True)
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump({"profiles": {}, "settings": {}, "version": 3}, f)
+
 def install_forge(mc_version, build=None):
     if build in (None, "auto", "", "recommended", "latest"):
         try:
@@ -275,6 +288,7 @@ def install_forge(mc_version, build=None):
     report("Downloading Forge installer...")
     download(ilurl, installer)
     report("Installing Forge (running official installer)...")
+    ensure_launcher_profile(GAME_DIR)
     java = shutil.which("java") or java_bin_for(mc_version)
     r = subprocess.run([java, "-jar", installer, "--installClient"], cwd=GAME_DIR, capture_output=True)
     # the installer names the version folder itself - find what it ACTUALLY created
