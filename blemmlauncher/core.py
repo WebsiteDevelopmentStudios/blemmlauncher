@@ -291,6 +291,20 @@ def ensure_launcher_profile(game_dir):
         with open(lp, "w", encoding="utf-8") as f:
             json.dump({"profiles": {}, "settings": {}, "version": 3}, f)
 
+def _forge_locally_processed(vj):
+    """Forge's own client/server/universal jars are built locally by the
+    installer's 'processors' step - they are NEVER hosted anywhere online
+    (that's why fetching them from libraries.minecraft.net 404s). If one of
+    these is missing on disk, the install is incomplete/corrupt even though
+    the version's .json file exists."""
+    for lib in vj.get("libraries", []):
+        if not lib.get("name", "").startswith("net.minecraftforge:forge:"):
+            continue
+        art = lib.get("downloads", {}).get("artifact")
+        if art and not os.path.exists(os.path.join(LIBS, art["path"])):
+            return False
+    return True
+
 def install_forge(mc_version, build=None):
     if build in (None, "auto", "", "recommended", "latest"):
         try:
@@ -301,8 +315,20 @@ def install_forge(mc_version, build=None):
         if not build:
             raise RuntimeError(f"No Forge build found for {mc_version} (promos fetch failed)")
     vid = f"{mc_version}-forge-{build}"
-    if os.path.exists(os.path.join(GAME_DIR, "versions", vid, vid + ".json")):
-        log(f"Forge {vid} already installed."); return vid
+
+    existing = os.path.join(GAME_DIR, "versions", vid, vid + ".json")
+    if os.path.exists(existing):
+        try:
+            if _forge_locally_processed(json.load(open(existing, encoding="utf-8"))):
+                log(f"Forge {vid} already installed."); return vid
+        except Exception:
+            pass
+        # .json exists but the locally-built jars don't - a previous install
+        # was left half-finished. Wipe it and reinstall from scratch instead
+        # of launching with a jar that will 404.
+        log(f"Forge {vid} install looks incomplete - reinstalling...")
+        shutil.rmtree(os.path.dirname(existing), ignore_errors=True)
+
     m = manifest()
     load_version_json(resolve_version(mc_version, m), m)
     os.makedirs(TOOLS, exist_ok=True)
@@ -314,18 +340,27 @@ def install_forge(mc_version, build=None):
     ensure_launcher_profile(GAME_DIR)
     java = shutil.which("java") or java_bin_for(mc_version)
     r = subprocess.run([java, "-jar", installer, "--installClient"], cwd=GAME_DIR, capture_output=True)
+    outp = ((r.stdout or b"") + (r.stderr or b"")).decode(errors="replace")
+
     # the installer names the version folder itself - find what it ACTUALLY created
     # (it doesn't always match our guess: capitalization/build string differ between eras)
     matches = [p for p in glob.glob(os.path.join(GAME_DIR, "versions", f"{mc_version}*forge*"))
                if os.path.exists(os.path.join(p, os.path.basename(p) + ".json"))]
     matches.sort(key=os.path.getmtime, reverse=True)
-    if not matches:
-        outp = ((r.stdout or b"") + (r.stderr or b"")).decode(errors="replace")
+
+    if r.returncode != 0 or not matches:
         raise RuntimeError(
             f"Forge install failed (installer exit code {r.returncode}).\n"
             f"--- installer output ---\n{outp[-1500:]}"
         )
     found = os.path.basename(matches[0])
+    vj_check = json.load(open(os.path.join(matches[0], found + ".json"), encoding="utf-8"))
+    if not _forge_locally_processed(vj_check):
+        raise RuntimeError(
+            "Forge installer exited OK but its processors step didn't finish "
+            "(the local client/server jars are missing).\n"
+            f"--- installer output ---\n{outp[-1500:]}"
+        )
     log(f"Forge installed: {found}")
     return found
 
