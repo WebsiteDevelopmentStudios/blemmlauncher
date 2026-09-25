@@ -15,7 +15,7 @@ BG = "#07110b"
 PANEL = "#0b1911"
 CARD = "#102218"
 FIELD = "#142b1d"
-FG = "#edfff2"
+FG = "#9CFFBC"
 MUTED = "#82a995"
 ACCENT = "#38ed7c"
 ACCENT2 = "#19b95b"
@@ -997,7 +997,7 @@ class App:
         console_wrap = tk.Frame(self.server_console_tab, bg=CARD)
         console_wrap.pack(fill="both", expand=True, padx=8, pady=8)
         self.server_console = scrolledtext.ScrolledText(
-            console_wrap, height=9, bg="#06100a", fg=FG,
+            console_wrap, height=9, bg="#041008", fg="#8CFFB1",
             insertbackground=FG, relief="flat", borderwidth=0,
             font=("Consolas", 9)
         )
@@ -1015,8 +1015,8 @@ class App:
         files.rowconfigure(1, weight=1)
         filebar = tk.Frame(files, bg=CARD)
         filebar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 5))
-        self.server_path_label = tk.Label(filebar, text="/", bg=CARD, fg=ACCENT,
-                                          font=("Segoe UI", 9, "bold"))
+        self.server_path_label = tk.Label(filebar, text="  /", bg=CARD, fg="#55F58B",
+                                          font=("Consolas", 10, "bold"), anchor="w")
         self.server_path_label.pack(side="left")
         for label, command in [
             ("Up", self._server_up),
@@ -1030,13 +1030,41 @@ class App:
 
         tree_frame = tk.Frame(files, bg=CARD)
         tree_frame.grid(row=1, column=0, sticky="nsw", padx=(8, 5), pady=(0, 8))
-        self.server_tree = ttk.Treeview(tree_frame, columns=("type", "size"), show="tree headings", height=17)
-        self.server_tree.heading("#0", text="Name")
+        tree_style = ttk.Style()
+        tree_style.configure(
+            "Server.Treeview",
+            background="#07170d",
+            fieldbackground="#07170d",
+            foreground="#8CFFB1",
+            borderwidth=0,
+            rowheight=29,
+            font=("Consolas", 9)
+        )
+        tree_style.map(
+            "Server.Treeview",
+            background=[("selected", "#0A3A20")],
+            foreground=[("selected", "#55F58B")]
+        )
+        tree_style.configure(
+            "Server.Treeview.Heading",
+            background="#0B2415",
+            foreground="#55F58B",
+            relief="flat",
+            font=("Segoe UI", 9, "bold")
+        )
+        self.server_tree = ttk.Treeview(
+            tree_frame,
+            columns=("type", "size"),
+            show="tree headings",
+            height=17,
+            style="Server.Treeview"
+        )
+        self.server_tree.heading("#0", text="  FILES")
         self.server_tree.heading("type", text="Type")
         self.server_tree.heading("size", text="Size")
-        self.server_tree.column("#0", width=210)
-        self.server_tree.column("type", width=70)
-        self.server_tree.column("size", width=80)
+        self.server_tree.column("#0", width=235, minwidth=180)
+        self.server_tree.column("type", width=75, anchor="center")
+        self.server_tree.column("size", width=90, anchor="e")
         self.server_tree.pack(side="left", fill="y")
         sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.server_tree.yview)
         sb.pack(side="right", fill="y")
@@ -1052,7 +1080,7 @@ class App:
                                            font=("Segoe UI", 9, "bold"))
         self.server_edit_label.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         self.server_editor = scrolledtext.ScrolledText(
-            editor_frame, bg=FIELD, fg=FG, insertbackground=ACCENT,
+            editor_frame, bg="#07170d", fg="#8CFFB1", insertbackground=ACCENT,
             relief="flat", borderwidth=0, undo=True, wrap="none",
             font=("Consolas", 9)
         )
@@ -1123,7 +1151,7 @@ class App:
         kind = tk.StringVar(value="Paper")
         version = tk.StringVar()
         ram = tk.StringVar(value="4G")
-        java = tk.StringVar(value="java")
+        java = tk.StringVar(value="")
 
         ttk.Label(card, text="Create a Server", style="Big.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 14))
         ttk.Label(card, text="Server name", style="MutedCard.TLabel").grid(row=1, column=0, sticky="w", pady=7)
@@ -1137,9 +1165,12 @@ class App:
         ttk.Label(card, text="RAM", style="MutedCard.TLabel").grid(row=4, column=0, sticky="w", pady=7)
         ttk.Combobox(card, textvariable=ram, values=["2G","4G","6G","8G","12G","16G"], state="readonly").grid(row=4, column=1, sticky="ew", padx=(12, 0), pady=7)
         ttk.Label(card, text="Java executable", style="MutedCard.TLabel").grid(row=5, column=0, sticky="w", pady=7)
-        ttk.Entry(card, textvariable=java).grid(row=5, column=1, sticky="ew", padx=(12, 0), pady=7)
+        java_entry = ttk.Entry(card, textvariable=java)
+        java_entry.grid(row=5, column=1, sticky="ew", padx=(12, 0), pady=7)
+        ttk.Label(card, text="Leave blank to automatically install/use the required Java version.",
+                  style="MutedCard.TLabel").grid(row=6, column=1, sticky="w", padx=(12, 0), pady=(0, 4))
         info = ttk.Label(card, text="Loading versions…", style="MutedCard.TLabel", wraplength=430)
-        info.grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 8))
+        info.grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 8))
 
         def load_versions():
             try:
@@ -1162,7 +1193,7 @@ class App:
                 return
             try:
                 self.status.config(text="Creating " + name.get() + " server…")
-                cfg = server.create(name.get().strip(), kind.get(), version.get(), ram.get(), java.get().strip() or "java")
+                cfg = server.create(name.get().strip(), kind.get(), version.get(), ram.get(), java.get().strip() or None)
                 d.destroy()
                 self._refresh_servers()
                 self._update_server_access()
@@ -1175,7 +1206,7 @@ class App:
             except Exception as e:
                 messagebox.showerror("Create Server", str(e), parent=d)
 
-        ttk.Button(card, text="Create Server", style="Primary.TButton", command=create_now).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        ttk.Button(card, text="Create Server", style="Primary.TButton", command=create_now).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(14, 0))
 
     def _delete_server(self):
         name = self._server_name
