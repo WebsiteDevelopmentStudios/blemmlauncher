@@ -84,6 +84,40 @@ def delete_developer(token: str, username: str) -> dict:
     return _request("/developers/" + quote(username, safe=""), "DELETE", token=token)
 
 
+def create_agent_pairing(token: str) -> dict:
+    return _request("/agents/pair", "POST", token=token)
+
+
+def claim_agent(pairing_code: str, name: str) -> dict:
+    return _request("/agents/claim", "POST", {
+        "code": pairing_code,
+        "name": name,
+    })
+
+
+def list_agents(token: str) -> list[dict]:
+    return _request("/agents", "GET", token=token).get("agents", [])
+
+
+def send_agent_command(token: str, agent_id: str, action: str, payload: Optional[dict] = None) -> dict:
+    from urllib.parse import quote
+    return _request(
+        "/agents/" + quote(str(agent_id), safe="") + "/command",
+        "POST",
+        {"action": action, "payload": payload or {}},
+        token,
+    )
+
+
+def list_agent_commands(token: str, agent_id: str) -> list[dict]:
+    from urllib.parse import quote
+    return _request(
+        "/agents/" + quote(str(agent_id), safe="") + "/commands",
+        "GET",
+        token=token,
+    ).get("commands", [])
+
+
 if __name__ == "__main__":
     import getpass
 
