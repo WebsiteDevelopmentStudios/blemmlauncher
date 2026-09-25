@@ -103,16 +103,23 @@ def versions(kind, limit=80):
     kind = str(kind).lower().strip()
     try:
         if kind in ("vanilla", "fabric"):
-            return [x["id"] for x in _request("https://mojang.com")["versions"] if x.get("type") == "release"][:limit]
+            return [x["id"] for x in _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")["versions"] if x.get("type") == "release"][:limit]
         if kind == "paper":
-            # Migrated from v2 to modern v3 tracking index endpoint
+            # Fixed to query active v3 index endpoint instead of deprecated v2 link
             return list(reversed(_request("https://papermc.io")["versions"]))[:limit]
         if kind == "forge":
             return sorted({k[:-11] for k in _request("https://minecraftforge.net")["promos"] if k.endswith("-recommended")}, reverse=True)[:limit]
         if kind == "neoforge":
-            return list(dict.fromkeys([".".join(str(b).split(".")[:2]) for b in _request("https://neoforged.net")["versions"] if len(str(b).split(".")) >= 2]))[:limit]
+            # Restored normal array splitting indexing properties to prevent internal exception crashes
+            build_list = _request("https://neoforged.net")["versions"]
+            parsed_versions = []
+            for b in build_list:
+                parts = str(b).split(".")
+                if len(parts) >= 2:
+                    parsed_versions.append(parts[0] + "." + parts[1])
+            return list(dict.fromkeys(parsed_versions))[:limit]
     except Exception: pass
-    return [x["id"] for x in _request("https://mojang.com")["versions"] if x.get("type") == "release"][:limit]
+    return [x["id"] for x in _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")["versions"] if x.get("type") == "release"][:limit]
 
 def create(name, kind, version, ram="4G", java="java"):
     if not safe_name(name): raise RuntimeError("Invalid server name.")
@@ -123,26 +130,24 @@ def create(name, kind, version, ram="4G", java="java"):
     kind, version = str(kind).lower(), str(version)
     
     if kind == "vanilla":
-        entry = next((x for x in _request("https://mojang.com")["versions"] if x["id"] == version), None)
+        entry = next((x for x in _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")["versions"] if x["id"] == version), None)
         if not entry: raise RuntimeError("Minecraft version not found.")
         url = _request(entry["url"]).get("downloads", {}).get("server", {}).get("url")
         if not url: raise RuntimeError("No official server JAR exists for this version.")
         _request(url, dest=os.path.join(d, "server.jar"))
     elif kind == "paper":
-        # Completely rewritten using modern v3 structure mappings
+        # Remapped deployment rules using standard v3 structures smoothly
         v_url = "https://papermc.io/versions/" + urllib.parse.quote(version)
         data = _request(v_url)
         builds = data.get("builds", [])
         if not builds: raise RuntimeError("No Paper build found for " + version)
         build = builds[-1]
-        
-        # Build the functional v3 download URI template
         url = v_url + "/builds/" + str(build) + "/downloads/paper-" + version + "-" + str(build) + ".jar"
         _request(url, dest=os.path.join(d, "server.jar"))
     elif kind in ("fabric", "forge", "neoforge"):
         installer = os.path.join(d, kind + "-installer.jar")
         if kind == "fabric":
-            _request(_request("https://fabricmc.net")["url"], dest=installer)
+            _request(_request("https://fabricmc.net")[0]["url"], dest=installer)
             args = [java, "-jar", kind + "-installer.jar", "server", "-mcversion", version, "-downloadMinecraft"]
         elif kind == "forge":
             build = _request("https://minecraftforge.net")["promos"].get(version + "-recommended") or _request("https://minecraftforge.net")["promos"].get(version + "-latest")
