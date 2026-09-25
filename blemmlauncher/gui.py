@@ -711,17 +711,27 @@ class App:
                     "name": result.get("name", "Owner PC"),
                 }
                 # Store only the agent credential, never the developer password.
-                root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-                state_path = os.path.join(root, "Dev", ".agent.json")
+                if getattr(sys, "frozen", False):
+                    root = os.path.dirname(os.path.abspath(sys.executable))
+                    state_dir = os.path.join(root, "Dev")
+                    agent_command = [sys.executable, "--agent"]
+                else:
+                    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                    state_dir = os.path.join(root, "Dev")
+                    agent_command = [sys.executable, "-m", "Dev.agent"]
+                state_path = os.path.join(state_dir, ".agent.json")
                 os.makedirs(os.path.dirname(state_path), exist_ok=True)
                 with open(state_path, "w", encoding="utf-8") as f:
                     json.dump(state, f, indent=2)
 
                 flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+                env = os.environ.copy()
+                env["BLEMM_AGENT_STATE_DIR"] = state_dir
                 subprocess.Popen(
-                    [sys.executable, "-m", "Dev.agent"],
+                    agent_command,
                     cwd=root,
                     creationflags=flags,
+                    env=env,
                 )
                 self.q.put(("owner_agent_ready", result, None, None))
             except Exception as exc:
