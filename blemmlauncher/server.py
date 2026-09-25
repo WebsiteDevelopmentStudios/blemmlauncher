@@ -1,6 +1,6 @@
 """BlemmLauncher local Minecraft server manager."""
 import json, os, shutil, subprocess, threading, urllib.request, urllib.parse, urllib.error, ssl, re
-from . import instances, core
+from . import instances, core, database
 
 SERVERS_DIR = os.path.join(instances.LAUNCHERS_ROOT, "servers")
 SERVER_TYPES = ("Vanilla", "Paper", "Fabric", "Forge", "NeoForge")
@@ -55,7 +55,11 @@ def _request(url, load_json=True, dest=None):
 
 def list_servers():
     os.makedirs(SERVERS_DIR, exist_ok=True)
-    return [n for n in sorted(os.listdir(SERVERS_DIR)) if os.path.isfile(os.path.join(SERVERS_DIR, n, "blemm-server.json"))]
+    disk = [n for n in sorted(os.listdir(SERVERS_DIR))
+            if os.path.isfile(os.path.join(SERVERS_DIR, n, "blemm-server.json"))]
+    # Reconcile the database with disk so servers created by older versions
+    # of BlemmLauncher are never lost.
+    return database.reconcile("servers", disk)
 
 def server_limit_reached():
     return len(list_servers()) >= MAX_SERVERS
@@ -64,7 +68,10 @@ def load(name):
     with open(os.path.join(root(name), "blemm-server.json"), encoding="utf-8") as f: return json.load(f)
 
 def save(name, cfg):
-    with open(os.path.join(root(name), "blemm-server.json"), "w", encoding="utf-8") as f: json.dump(cfg, f, indent=2)
+    os.makedirs(root(name), exist_ok=True)
+    with open(os.path.join(root(name), "blemm-server.json"), "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+    database.register("servers", name)
 
 def running(name):
     p = PROCESSES.get(name)
@@ -195,6 +202,7 @@ def network_info(name):
 def delete(name):
     if running(name): kill(name)
     shutil.rmtree(root(name), ignore_errors=True)
+    database.unregister("servers", name)
 
 def tree(name, rel=""):
     folder = path(name, rel)
