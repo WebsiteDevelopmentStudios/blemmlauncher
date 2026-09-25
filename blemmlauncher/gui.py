@@ -539,42 +539,93 @@ class App:
         card.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
 
         ttk.Label(card, text="Developer", style="Big.TLabel").pack(anchor="w")
-        self._developer_identity_label = ttk.Label(
-            card, text="Developer access", style="MutedCard.TLabel"
+        self._developer_identity_label = ttk.Label(card, text="Developer access", style="MutedCard.TLabel")
+        self._developer_identity_label.pack(anchor="w", pady=(4, 10))
+
+        remote = ttk.Frame(card, style="Card.TFrame")
+        remote.pack(fill="x", pady=(0, 12))
+        ttk.Label(remote, text="Remote Developer Server", style="Accent.TLabel").pack(anchor="w")
+        ttk.Label(
+            remote,
+            text="Control a Minecraft server from anywhere through the secure Cloudflare relay. The server PC makes outbound HTTPS connections; no server-management port is exposed.",
+            style="MutedCard.TLabel", wraplength=900
+        ).pack(anchor="w", pady=(3, 8))
+
+        pair_row = ttk.Frame(remote, style="Card.TFrame")
+        pair_row.pack(fill="x", pady=(0, 7))
+        ttk.Button(pair_row, text="Generate Pairing Code", style="Primary.TButton",
+                   command=self._remote_pair).pack(side="left")
+        ttk.Button(pair_row, text="Connect This PC",
+                   command=self._remote_launch_agent).pack(side="left", padx=(8, 0))
+        ttk.Button(pair_row, text="Refresh Agents",
+                   command=self._remote_refresh_agents).pack(side="left", padx=(8, 0))
+        self._remote_pairing_label = ttk.Label(pair_row, text="No pairing code generated.",
+                                               style="MutedCard.TLabel")
+        self._remote_pairing_label.pack(side="left", padx=(12, 0))
+
+        agent_row = ttk.Frame(remote, style="Card.TFrame")
+        agent_row.pack(fill="x", pady=(0, 7))
+        ttk.Label(agent_row, text="Server PC", style="MutedCard.TLabel").pack(side="left")
+        self._remote_agent_combo = ttk.Combobox(agent_row, state="readonly", width=26)
+        self._remote_agent_combo.pack(side="left", padx=(8, 10))
+        self._remote_agent_combo.bind("<<ComboboxSelected>>", self._remote_agent_selected)
+        ttk.Label(agent_row, text="Minecraft server", style="MutedCard.TLabel").pack(side="left")
+        ttk.Combobox(agent_row, textvariable=self._remote_server, state="readonly", width=24,
+                     name="remote_server_combo").pack(side="left", padx=(8, 0))
+        self._remote_server_combo = agent_row.children["remote_server_combo"]
+
+        control_row = ttk.Frame(remote, style="Card.TFrame")
+        control_row.pack(fill="x", pady=(0, 7))
+        for label, action in (("Refresh", "status"), ("Start", "start"), ("Stop", "stop"),
+                              ("Restart", "restart"), ("Console", "logs")):
+            ttk.Button(control_row, text=label,
+                       command=lambda a=action: self._remote_action(a)).pack(side="left", padx=(0, 6))
+        self._remote_status_label = ttk.Label(control_row, text="No remote server selected.",
+                                              style="MutedCard.TLabel")
+        self._remote_status_label.pack(side="left", padx=(8, 0))
+
+        self._remote_console = scrolledtext.ScrolledText(
+            remote, height=7, bg="#07170d", fg="#8CFFB1", insertbackground=ACCENT,
+            relief="flat", borderwidth=0, wrap="none", font=("Consolas", 9)
         )
-        self._developer_identity_label.pack(anchor="w", pady=(4, 14))
+        self._remote_console.pack(fill="x", pady=(0, 7))
+
+        command_row = ttk.Frame(remote, style="Card.TFrame")
+        command_row.pack(fill="x")
+        self._remote_command_entry = ttk.Entry(command_row)
+        self._remote_command_entry.pack(side="left", fill="x", expand=True)
+        self._remote_command_entry.bind("<Return>", lambda _e: self._remote_send_console())
+        ttk.Button(command_row, text="Send Command", style="Primary.TButton",
+                   command=self._remote_send_console).pack(side="left", padx=(8, 0))
+
+        file_row = ttk.Frame(remote, style="Card.TFrame")
+        file_row.pack(fill="x", pady=(7, 0))
+        ttk.Label(file_row, text="Remote file", style="MutedCard.TLabel").pack(side="left")
+        ttk.Entry(file_row, textvariable=self._remote_file).pack(side="left", fill="x", expand=True, padx=8)
+        ttk.Button(file_row, text="Load", command=self._remote_read_file).pack(side="left")
+        ttk.Button(file_row, text="Save", command=self._remote_write_file).pack(side="left", padx=(6, 0))
 
         self._developer_owner_frame = ttk.Frame(card, style="Card.TFrame")
-        ttk.Label(self._developer_owner_frame, text="Owner controls",
-                  style="Accent.TLabel").pack(anchor="w")
+        ttk.Label(self._developer_owner_frame, text="Owner controls", style="Accent.TLabel").pack(anchor="w")
         owner_actions = ttk.Frame(self._developer_owner_frame, style="Card.TFrame")
-        owner_actions.pack(fill="x", pady=(8, 12))
-        ttk.Button(owner_actions, text="Refresh Developers",
-                   command=self._developer_refresh).pack(side="left")
-        ttk.Button(owner_actions, text="+ Create Developer",
-                   style="Primary.TButton",
+        owner_actions.pack(fill="x", pady=(8, 8))
+        ttk.Button(owner_actions, text="Refresh Developers", command=self._developer_refresh).pack(side="left")
+        ttk.Button(owner_actions, text="+ Create Developer", style="Primary.TButton",
                    command=self._developer_create).pack(side="left", padx=(8, 0))
 
         self._developer_tree = ttk.Treeview(
-            self._developer_owner_frame,
-            columns=("username", "role", "created"),
-            show="headings", height=12
+            self._developer_owner_frame, columns=("username", "role", "created"),
+            show="headings", height=7
         )
-        for col, title, width in (
-            ("username", "Username", 220),
-            ("role", "Role", 120),
-            ("created", "Created", 220),
-        ):
+        for col, title, width in (("username", "Username", 220), ("role", "Role", 120), ("created", "Created", 220)):
             self._developer_tree.heading(col, text=title)
             self._developer_tree.column(col, width=width)
-        self._developer_tree.pack(fill="both", expand=True, pady=(0, 10))
+        self._developer_tree.pack(fill="x", pady=(0, 8))
 
         actions = ttk.Frame(self._developer_owner_frame, style="Card.TFrame")
         actions.pack(fill="x")
-        ttk.Button(actions, text="Reset Selected Password",
-                   command=self._developer_reset).pack(side="left")
-        ttk.Button(actions, text="Delete Selected",
-                   command=self._developer_delete).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Reset Selected Password", command=self._developer_reset).pack(side="left")
+        ttk.Button(actions, text="Delete Selected", command=self._developer_delete).pack(side="left", padx=(8, 0))
 
         self._developer_nonowner_label = ttk.Label(
             card,
