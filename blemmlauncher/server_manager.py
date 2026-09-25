@@ -180,7 +180,7 @@ class OwnerServerManager:
                     elif action == "logs":
                         result = {"server": name, "lines": []}
                     elif action == "create_server":
-                        result = server.create(name, str(payload.get("type", "paper")).strip().lower(), str(payload.get("version", "")).strip(), ram=str(payload.get("ram", "4G")).strip() or "4G")
+                        result = server.create(name, str(payload.get("type", "paper")).strip().lower(), str(payload.get("version", "")).strip(), ram=str(payload.get("ram", "4G")).strip() or "4G", allow_reserved=True)
                     elif action == "files":
                         rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
                         result = {"server": name, "path": rel, "files": server.tree(name, rel)}
