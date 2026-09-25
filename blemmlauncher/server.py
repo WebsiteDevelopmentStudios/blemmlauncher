@@ -122,6 +122,52 @@ def kill(name):
     p = PROCESSES.get(name)
     if p and p.poll() is None: p.terminate()
 
+def _server_port(name):
+    port = 25565
+    try:
+        p = path(name, "server.properties")
+        if os.path.isfile(p):
+            with open(p, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("server-port="):
+                        value = line.split("=", 1)[1].strip()
+                        if value.isdigit():
+                            port = int(value)
+                        break
+    except Exception:
+        pass
+    return port
+
+
+def network_info(name):
+    """Return addresses useful for connecting to a local server."""
+    import socket
+
+    port = _server_port(name)
+    local_ip = "127.0.0.1"
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("8.8.8.8", 80))
+            local_ip = sock.getsockname()[0]
+        finally:
+            sock.close()
+    except Exception:
+        try:
+            candidate = socket.gethostbyname(socket.gethostname())
+            if not candidate.startswith("127."):
+                local_ip = candidate
+        except Exception:
+            pass
+
+    return {
+        "local_ip": local_ip,
+        "local_address": "127.0.0.1:" + str(port),
+        "lan_address": local_ip + ":" + str(port),
+        "port": port,
+    }
+
 def delete(name):
     if running(name): kill(name)
     shutil.rmtree(root(name), ignore_errors=True)
