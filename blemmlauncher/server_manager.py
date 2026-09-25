@@ -5,7 +5,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, scrolledtext
 
 from Dev import auth as dev_auth
-from . import server
+from . import server, core
 
 BG = "#07110b"
 CARD = "#102218"
@@ -34,12 +34,39 @@ class OwnerServerManager:
         self.local = bool((getattr(app, "_dev_identity", None) or {}).get("role") == "owner")
 
         self.status = tk.StringVar(value="Loading…")
+        self.progress_text = tk.StringVar(value="")
+        self.progress_value = tk.DoubleVar(value=0.0)
         self.server_var = tk.StringVar()
         self.path_var = tk.StringVar()
         self.file_var = tk.StringVar()
 
         self._build()
+        core.add_reporter(self._progress_report)
+        self.win.protocol("WM_DELETE_WINDOW", self._close)
         self.refresh_agents()
+
+    def _close(self):
+        core.remove_reporter(self._progress_report)
+        self.win.destroy()
+
+    def _progress_report(self, kind, text, done=None, total=None):
+        if not self.win.winfo_exists():
+            return
+        def apply():
+            if not self.win.winfo_exists():
+                return
+            self.progress_text.set(str(text or ""))
+            if total:
+                self.progress.stop()
+                self.progress_value.set(max(0.0, min(100.0, float(done or 0) / float(total) * 100.0)))
+                self.progress.configure(mode="determinate")
+            else:
+                self.progress.configure(mode="indeterminate")
+                self.progress.start(12)
+        try:
+            self.win.after(0, apply)
+        except Exception:
+            pass
 
     def _button(self, parent, text, command, primary=False, danger=False):
         return tk.Button(
@@ -59,6 +86,14 @@ class OwnerServerManager:
                  font=("Segoe UI", 18, "bold")).pack(side="left")
         tk.Label(head, textvariable=self.status, bg=BG, fg=MUTED,
                  font=("Segoe UI", 9)).pack(side="right")
+
+        progress = tk.Frame(self.win, bg=BG)
+        progress.pack(fill="x", padx=16, pady=(0, 8))
+        tk.Label(progress, textvariable=self.progress_text, bg=BG, fg=MUTED,
+                 font=("Segoe UI", 8)).pack(anchor="w")
+        self.progress = ttk.Progressbar(progress, variable=self.progress_value,
+                                        maximum=100, mode="determinate")
+        self.progress.pack(fill="x", pady=(3, 0))
 
         bar = tk.Frame(self.win, bg=CARD)
         bar.pack(fill="x", padx=16, pady=(0, 8))
@@ -119,7 +154,10 @@ class OwnerServerManager:
             def local_worker():
                 try:
                     name = str(payload.get("server", "")).strip()
-                    if action == "status":
+                    if action == "versions":
+                        kind = str(payload.get("type", "paper")).strip().lower()
+                        result = {"type": kind, "versions": server.versions(kind, int(payload.get("limit", 80)))}
+                    elif action == "status":
                         rows = []
                         for n in server.list_servers():
                             try:
@@ -336,20 +374,128 @@ class OwnerServerManager:
         if not self.agent:
             self._show_error("Select an online server PC first.")
             return
-        name = simpledialog.askstring("Create Server","Server name:",parent=self.win)
-        if not name: return
-        kind = simpledialog.askstring("Create Server",
-            "Type: vanilla, paper, fabric, forge, or neoforge",
-            initialvalue="paper",parent=self.win)
-        if not kind: return
-        version = simpledialog.askstring("Create Server","Minecraft version:",parent=self.win)
-        if not version: return
-        ram = simpledialog.askstring("Create Server","RAM:",initialvalue="4G",parent=self.win)
-        if not ram: return
-        self.status.set("Installing server…")
-        self.call("create_server", {"server":name.strip(),"type":kind.strip(),
-                   "version":version.strip(),"ram":ram.strip()},
-                  lambda r,e: (self.status.set(e or "Server created."), self.refresh_servers()))
+
+        wizard = tk.Toplevel(self.win)
+        wizard.title("Create Minecraft Server")
+        wizard.geometry("560x500")
+        wizard.minsize(520, 460)
+        wizard.configure(bg=BG)
+        wizard.transient(self.win)
+        wizard.grab_set()
+
+        name_var = tk.StringVar()
+        type_var = tk.StringVar(value="Paper")
+        version_var = tk.StringVar()
+        ram_var = tk.StringVar(value="4G")
+        info_var = tk.StringVar(value="Choose a server type to load available Minecraft versions.")
+
+        outer = tk.Frame(wizard, bg=BG)
+        outer.pack(fill="both", expand=True, padx=24, pady=22)
+        tk.Label(outer, text="Create a Minecraft Server", bg=BG, fg=FG,
+                 font=("Segoe UI", 19, "bold")).pack(anchor="w")
+        tk.Label(outer, text="BlemmLauncher will download the server software and install the required Java automatically.",
+                 bg=BG, fg=MUTED, wraplength=500, justify="left").pack(anchor="w", pady=(5, 20))
+
+        def field(label, widget):
+            tk.Label(outer, text=label, bg=BG, fg=MUTED,
+                     font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(7, 4))
+            widget.pack(fill="x", ipady=5)
+
+        name_entry = tk.Entry(outer, textvariable=name_var, bg=FIELD, fg=FG,
+                              insertbackground=FG, relief="flat", font=("Segoe UI", 10))
+        field("SERVER NAME", name_entry)
+
+        type_box = ttk.Combobox(outer, textvariable=type_var, state="readonly",
+                                values=("Vanilla", "Paper", "Fabric", "Forge", "NeoForge"))
+        field("SERVER SOFTWARE", type_box)
+
+        version_box = ttk.Combobox(outer, textvariable=version_var, state="readonly")
+        field("MINECRAFT VERSION", version_box)
+
+        ram_box = ttk.Combobox(outer, textvariable=ram_var, state="readonly",
+                               values=("2G", "4G", "6G", "8G", "10G", "12G", "16G"))
+        field("SERVER RAM", ram_box)
+
+        tk.Label(outer, textvariable=info_var, bg=BG, fg=MUTED,
+                 wraplength=500, justify="left").pack(anchor="w", pady=(10, 6))
+
+        buttons = tk.Frame(outer, bg=BG)
+        buttons.pack(fill="x", pady=(12, 0))
+        self._button(buttons, "Cancel", wizard.destroy).pack(side="right", padx=(6, 0))
+        install = self._button(buttons, "Install Server", lambda: None, True)
+        install.pack(side="right")
+
+        loading = {"active": False}
+
+        def load_versions(*_):
+            if loading["active"]:
+                return
+            kind = type_var.get().strip().lower()
+            loading["active"] = True
+            install.config(state="disabled")
+            version_box["values"] = ()
+            version_var.set("")
+            info_var.set("Loading " + kind.title() + " versions…")
+            def done(result, error):
+                loading["active"] = False
+                vals = list((result or {}).get("versions", [])) if not error else []
+                version_box["values"] = vals
+                if vals:
+                    version_var.set(vals[0])
+                    info_var.set(str(len(vals)) + " versions available. Java and server downloads will be handled automatically.")
+                    install.config(state="normal")
+                else:
+                    info_var.set(error or "No versions were returned.")
+                    install.config(state="disabled")
+            self.call("versions", {"type": kind, "limit": 80}, done)
+
+        type_box.bind("<<ComboboxSelected>>", load_versions)
+        load_versions()
+
+        def install_server():
+            name = name_var.get().strip()
+            kind = type_var.get().strip().lower()
+            version = version_var.get().strip()
+            ram = ram_var.get().strip()
+            if not name:
+                messagebox.showinfo("Create Server", "Enter a server name.", parent=wizard)
+                return
+            if not version:
+                messagebox.showinfo("Create Server", "Choose a Minecraft version.", parent=wizard)
+                return
+            install.config(state="disabled", text="Installing…")
+            type_box.config(state="disabled")
+            version_box.config(state="disabled")
+            ram_box.config(state="disabled")
+            name_entry.config(state="disabled")
+            info_var.set("Preparing Java and server files…")
+            self.status.set("Installing " + name + "…")
+            self.progress_text.set("Starting download…")
+            self.progress_value.set(0)
+            self.progress.configure(mode="determinate")
+
+            def done(result, error):
+                if error:
+                    self.status.set("Server installation failed.")
+                    self.progress_text.set(str(error))
+                    messagebox.showerror("Server Installation", str(error), parent=wizard)
+                    install.config(state="normal", text="Install Server")
+                    type_box.config(state="readonly")
+                    version_box.config(state="readonly")
+                    ram_box.config(state="readonly")
+                    name_entry.config(state="normal")
+                    return
+                self.progress.stop()
+                self.progress_value.set(100)
+                self.progress_text.set("Installation complete.")
+                self.status.set("Server installed: " + name)
+                wizard.grab_release()
+                wizard.destroy()
+                self.refresh_servers()
+
+            self.call("create_server", {"server": name, "type": kind, "version": version, "ram": ram}, done)
+
+        install.config(command=install_server)
 
     def refresh_files(self):
         if not self.server_var.get():
