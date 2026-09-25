@@ -10,14 +10,27 @@ from __future__ import annotations
 import json
 import os
 import socket
+import ssl
 import urllib.error
 import urllib.request
 from typing import Optional
+
+try:
+    import certifi
+except ImportError:
+    certifi = None
 
 DEV_AUTH_URL = os.environ.get(
     "BLEMM_DEV_AUTH_URL",
     "https://blemmlauncher-dev-auth.wowgrayhaha.workers.dev",
 ).strip().rstrip("/")
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """Build a verified TLS context using certifi when available."""
+    if certifi is not None:
+        return ssl.create_default_context(cafile=certifi.where())
+    return ssl.create_default_context()
 
 
 def _request(
@@ -26,7 +39,7 @@ def _request(
     body: Optional[dict] = None,
     token: Optional[str] = None,
 ) -> dict:
-    """Make a JSON request to the Worker with useful network diagnostics."""
+    """Make a JSON request to the Worker with secure TLS and useful diagnostics."""
     payload = None if body is None else json.dumps(body).encode("utf-8")
     headers = {
         "Accept": "application/json",
@@ -43,7 +56,11 @@ def _request(
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(
+            request,
+            timeout=20,
+            context=_ssl_context(),
+        ) as response:
             raw = response.read().decode("utf-8")
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
@@ -58,6 +75,12 @@ def _request(
         ) from exc
     except urllib.error.URLError as exc:
         reason = getattr(exc, "reason", exc)
+        if isinstance(reason, ssl.SSLCertVerificationError):
+            raise RuntimeError(
+                "Secure HTTPS verification failed for the Cloudflare developer "
+                "authentication Worker. Update the certifi package with "
+                "'python -m pip install --upgrade certifi'."
+            ) from exc
         if isinstance(reason, socket.gaierror):
             raise RuntimeError(
                 "Could not resolve the Cloudflare developer authentication Worker "
