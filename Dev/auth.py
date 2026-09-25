@@ -187,6 +187,15 @@ def claim_agent(pairing_code: str, name: str) -> dict:
     )
 
 
+def register_owner_agent(token: str, name: str = "") -> dict:
+    return _request(
+        "/agents/owner/register",
+        "POST",
+        {"name": name} if name else {},
+        token,
+    )
+
+
 def list_agents(token: str) -> list[dict]:
     return _request("/agents", "GET", token=token).get("agents", [])
 
