@@ -1186,6 +1186,9 @@ class App:
                 server.delete(name)
                 self._server_name = None
                 self._refresh_servers()
+                self._update_server_access()
+                if not server.list_servers():
+                    self.show_page("Play")
             except Exception as e:
                 messagebox.showerror("Delete Server", str(e))
 
