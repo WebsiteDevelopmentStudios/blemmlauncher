@@ -15,7 +15,7 @@ def safe_name(name):
 
 
 def is_reserved_name(name):
-    return False
+    return str(name).strip().casefold() == "survival"
 
 def root(name):
     if not safe_name(name): raise RuntimeError("Invalid server name.")
