@@ -213,7 +213,7 @@ def _required_java(vid):
         # Starting with Minecraft 26.1, the game/server requires Java 25.
         # The new 26.x versioning scheme means the first numeric component
         # is the Minecraft release year, not the old 1.x minor component.
-        m = re.match(r"^(\\d+)\\.(\\d+)", text)
+        m = re.match(r"^(\d+)\.(\d+)", text)
 
         if m:
             first = int(m.group(1))
