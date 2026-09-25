@@ -5,7 +5,8 @@ from . import instances, core, database
 SERVERS_DIR = os.path.join(instances.LAUNCHERS_ROOT, "servers")
 SERVER_TYPES = ("Vanilla", "Paper", "Fabric", "Forge", "NeoForge")
 MAX_SERVERS = 2
-PROCESSES, CALLBACKS = {}, {}
+PROCESSES, CALLBACKS = {}
+SERVER_LOGS = {}, {}
 
 def safe_name(name):
     return bool(name) and name not in (".", "..") and not any(c in name for c in '<>:|?*"') and "/" not in name and "\\" not in name
@@ -160,12 +161,25 @@ def start(name, callback=None):
         env["JAVA_HOME"] = java_home
     p = subprocess.Popen(cmd, cwd=root(name), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
     PROCESSES[name], CALLBACKS[name] = p, callback
+    SERVER_LOGS[name] = deque(maxlen=500)
     def reader():
         for line in p.stdout:
-            if CALLBACKS.get(name): CALLBACKS[name](name, line.rstrip())
-        if CALLBACKS.get(name): CALLBACKS[name](name, "Server exited with code " + str(p.poll()))
+            clean = line.rstrip()
+            SERVER_LOGS.setdefault(name, deque(maxlen=500)).append({
+                "server": name, "line": clean, "time": time.time()
+            })
+            if CALLBACKS.get(name): CALLBACKS[name](name, clean)
+        exit_line = "Server exited with code " + str(p.poll())
+        SERVER_LOGS.setdefault(name, deque(maxlen=500)).append({
+            "server": name, "line": exit_line, "time": time.time()
+        })
+        if CALLBACKS.get(name): CALLBACKS.get(name)(name, exit_line)
         PROCESSES.pop(name, None); CALLBACKS.pop(name, None)
     threading.Thread(target=reader, daemon=True).start()
+
+def get_logs(name):
+    return list(SERVER_LOGS.get(name, deque(maxlen=500)))[-200:]
+
 
 def command(name, value):
     p = PROCESSES.get(name)
