@@ -145,7 +145,7 @@ def _domain_slug(name):
     return value or "server"
 
 
-def domain_info(name, suffix="is-a.dev"):
+def domain_info(name, suffix="blemm.eu.cc"):
     """Build a safe free-domain candidate from the server name.
 
     The harys722/free-domains repository is a directory of free-domain
