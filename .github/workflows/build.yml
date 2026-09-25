@@ -38,6 +38,7 @@ jobs:
           pyinstaller --clean --onefile --noconsole --uac-admin `
             --name BlemmLauncher `
             --collect-submodules blemmlauncher `
+            --collect-submodules Dev `
             --collect-data certifi `
             --hidden-import certifi `
             run.py
