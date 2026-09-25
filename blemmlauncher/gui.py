@@ -138,7 +138,7 @@ class App:
         self._server_path = ""
         self._server_edit_path = None
         self._server_editor_dirty = False
-        self._server_domain_suffix = tk.StringVar(value="is-a.dev")
+        self._server_domain_suffix = tk.StringVar(value="blemm.eu.cc")
 
         self._profile_path = os.path.join(instances.LAUNCHERS_ROOT, "profile.json")
         self._profile = self._load_profile()
