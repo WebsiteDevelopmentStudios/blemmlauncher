@@ -123,7 +123,8 @@ def create(name, version, loader=None, ram="4G", username="Blemm", build=None):
         "loader_build": build,
         "ram": ram,
         "username": username,
-        "optifine": False
+        "optifine": False,
+        "demo": False
     }
     save_cfg(name, cfg)
     return cfg
