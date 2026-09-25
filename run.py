@@ -98,6 +98,11 @@ def main():
               "If Minecraft/Java downloads fail, run the launcher "
               "as administrator.")
 
+    if "--agent" in args:
+        from Dev import agent
+        agent.main()
+        return
+
     if "--instance" in args:
         i = args.index("--instance")
         name = args[i + 1]
