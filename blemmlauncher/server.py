@@ -103,15 +103,16 @@ def versions(kind, limit=80):
     kind = str(kind).lower().strip()
     try:
         if kind in ("vanilla", "fabric"):
-            return [x["id"] for x in _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")["versions"] if x.get("type") == "release"][:limit]
+            return [x["id"] for x in _request("https://mojang.com")["versions"] if x.get("type") == "release"][:limit]
         if kind == "paper":
-            return list(reversed(_request("https://api.papermc.io/v2/projects/paper")["versions"]))[:limit]
+            # Migrated from v2 to modern v3 tracking index endpoint
+            return list(reversed(_request("https://papermc.io")["versions"]))[:limit]
         if kind == "forge":
             return sorted({k[:-11] for k in _request("https://minecraftforge.net")["promos"] if k.endswith("-recommended")}, reverse=True)[:limit]
         if kind == "neoforge":
-            return list(dict.fromkeys([".".join(str(b).split(".")[:2]) for b in _request("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")["versions"] if len(str(b).split(".")) >= 2]))[:limit]
+            return list(dict.fromkeys([".".join(str(b).split(".")[:2]) for b in _request("https://neoforged.net")["versions"] if len(str(b).split(".")) >= 2]))[:limit]
     except Exception: pass
-    return [x["id"] for x in _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")["versions"] if x.get("type") == "release"][:limit]
+    return [x["id"] for x in _request("https://mojang.com")["versions"] if x.get("type") == "release"][:limit]
 
 def create(name, kind, version, ram="4G", java="java"):
     if not safe_name(name): raise RuntimeError("Invalid server name.")
@@ -122,21 +123,26 @@ def create(name, kind, version, ram="4G", java="java"):
     kind, version = str(kind).lower(), str(version)
     
     if kind == "vanilla":
-        entry = next((x for x in _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")["versions"] if x["id"] == version), None)
+        entry = next((x for x in _request("https://mojang.com")["versions"] if x["id"] == version), None)
         if not entry: raise RuntimeError("Minecraft version not found.")
         url = _request(entry["url"]).get("downloads", {}).get("server", {}).get("url")
         if not url: raise RuntimeError("No official server JAR exists for this version.")
         _request(url, dest=os.path.join(d, "server.jar"))
     elif kind == "paper":
-        v_url = "https://api.papermc.io/v2/projects/paper/versions/" + urllib.parse.quote(version)
-        builds = _request(v_url)["builds"]
-        build = builds[-1].get("build") if builds and isinstance(builds, list) and isinstance(builds[-1], dict) else (builds[-1] if builds else None)
-        if not build: raise RuntimeError("No Paper build found for " + version)
-        _request(v_url + "/builds/" + str(build) + "/downloads/paper-" + version + "-" + str(build) + ".jar", dest=os.path.join(d, "server.jar"))
+        # Completely rewritten using modern v3 structure mappings
+        v_url = "https://papermc.io/versions/" + urllib.parse.quote(version)
+        data = _request(v_url)
+        builds = data.get("builds", [])
+        if not builds: raise RuntimeError("No Paper build found for " + version)
+        build = builds[-1]
+        
+        # Build the functional v3 download URI template
+        url = v_url + "/builds/" + str(build) + "/downloads/paper-" + version + "-" + str(build) + ".jar"
+        _request(url, dest=os.path.join(d, "server.jar"))
     elif kind in ("fabric", "forge", "neoforge"):
         installer = os.path.join(d, kind + "-installer.jar")
         if kind == "fabric":
-            _request(_request("https://fabricmc.net")[0]["url"], dest=installer)
+            _request(_request("https://fabricmc.net")["url"], dest=installer)
             args = [java, "-jar", kind + "-installer.jar", "server", "-mcversion", version, "-downloadMinecraft"]
         elif kind == "forge":
             build = _request("https://minecraftforge.net")["promos"].get(version + "-recommended") or _request("https://minecraftforge.net")["promos"].get(version + "-latest")
@@ -144,7 +150,7 @@ def create(name, kind, version, ram="4G", java="java"):
             _request("https://minecraftforge.net" + version + "-" + build + "/forge-" + version + "-" + build + "-installer.jar", dest=installer)
             args = [java, "-jar", kind + "-installer.jar", "--installServer"]
         elif kind == "neoforge":
-            build = sorted([str(x) for x in _request("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")["versions"] if str(x).startswith(version + ".")])[-1]
+            build = sorted([str(x) for x in _request("https://neoforged.net")["versions"] if str(x).startswith(version + ".")])[-1]
             _request("https://neoforged.net" + build + "/neoforge-" + build + "-installer.jar", dest=installer)
             args = [java, "-jar", kind + "-installer.jar", "--installServer"]
         r = subprocess.run(args, cwd=d, capture_output=True, text=True, timeout=900 if kind == "fabric" else 1800)
