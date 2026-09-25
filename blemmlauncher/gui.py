@@ -6,6 +6,7 @@ import shutil
 import queue
 import threading
 import tkinter as tk
+import webbrowser
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 
 from . import core, instances, server
@@ -137,6 +138,7 @@ class App:
         self._server_path = ""
         self._server_edit_path = None
         self._server_editor_dirty = False
+        self._server_domain_suffix = tk.StringVar(value="is-a.dev")
 
         self._profile_path = os.path.join(instances.LAUNCHERS_ROOT, "profile.json")
         self._profile = self._load_profile()
@@ -1029,6 +1031,20 @@ class App:
             bg=CARD, fg=MUTED, font=("Segoe UI", 8), anchor="w"
         )
         self.server_network_hint.grid(row=1, column=0, columnspan=4, sticky="w", pady=(5, 0))
+        domain_box = tk.Frame(info, bg=CARD)
+        domain_box.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        domain_box.columnconfigure(1, weight=1)
+        tk.Label(domain_box, text="FREE DOMAIN", bg=CARD, fg=ACCENT,
+                 font=("Segoe UI", 8, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 12))
+        self.server_domain_label = tk.Label(domain_box, text="—", bg=CARD, fg=FG,
+                                            font=("Consolas", 9, "bold"), anchor="w")
+        self.server_domain_label.grid(row=0, column=1, sticky="w")
+        ttk.Button(domain_box, text="Copy Domain", command=self._copy_server_domain).grid(row=0, column=2, sticky="e", padx=(8, 0))
+        ttk.Button(domain_box, text="Get Free Domain", command=self._open_free_domain).grid(row=0, column=3, sticky="e", padx=(8, 0))
+        self.server_domain_hint = tk.Label(domain_box,
+            text="The free-domains project is a directory; registration is done through the provider you choose.",
+            bg=CARD, fg=MUTED, font=("Segoe UI", 8), anchor="w")
+        self.server_domain_hint.grid(row=1, column=0, columnspan=4, sticky="w", pady=(5, 0))
         controls = tk.Frame(info, bg=CARD)
         controls.grid(row=0, column=2, rowspan=2, sticky="e")
         self.server_start_btn = ttk.Button(controls, text="▶ Start", style="Primary.TButton",
@@ -1255,6 +1271,7 @@ class App:
             self.server_lan_label.config(text="LAN: unavailable")
             self.server_network_hint.config(text=str(e))
 
+        self._refresh_server_domain()
     def _copy_server_lan(self):
         if not self._server_name:
             return
@@ -1276,6 +1293,34 @@ class App:
             self.status.config(text="Copied server address: " + value, foreground=SUCCESS)
         except Exception as e:
             messagebox.showerror("Copy Address", str(e))
+
+    def _refresh_server_domain(self):
+        if not self._server_name:
+            return
+        try:
+            info = server.domain_info(self._server_name, self._server_domain_suffix.get())
+            self.server_domain_label.config(text=info["domain"])
+            self.server_domain_hint.config(
+                text=info["status"]
+            )
+        except Exception as e:
+            self.server_domain_label.config(text="Unavailable")
+            self.server_domain_hint.config(text=str(e))
+
+    def _copy_server_domain(self):
+        if not self._server_name:
+            return
+        try:
+            value = server.domain_info(self._server_name, self._server_domain_suffix.get())["domain"]
+            self.root.clipboard_clear()
+            self.root.clipboard_append(value)
+            self.status.config(text="Copied domain: " + value, foreground=SUCCESS)
+        except Exception as e:
+            messagebox.showerror("Copy Domain", str(e))
+
+    def _open_free_domain(self):
+        webbrowser.open("https://github.com/harys722/free-domains")
+        self.status.config(text="Opened the Free Domains directory. Choose a provider and register the displayed hostname.", foreground=SUCCESS)
 
     def _new_server_dialog(self):
         d = tk.Toplevel(self.root)
