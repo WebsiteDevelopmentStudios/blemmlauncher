@@ -147,27 +147,36 @@ def remove(name, rel):
 def rename(name, old, new):
     os.replace(path(name, old), path(name, new))
 
-def versions(kind, limit=50):
-    kind = str(kind).lower()
-    if kind in ("vanilla", "fabric"):
+def versions(kind, limit=80):
+    """Load selectable release versions, falling back to Mojang if a provider fails."""
+    kind = str(kind).lower().strip()
+    try:
+        if kind in ("vanilla", "fabric"):
+            data = _json("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
+            return [x["id"] for x in data.get("versions", []) if x.get("type") == "release"][:limit]
+        if kind == "paper":
+            data = _json("https://api.papermc.io/v2/projects/paper")
+            vals = list(reversed(data.get("versions", [])))
+            return vals[:limit] or versions("vanilla", limit)
+        if kind == "forge":
+            data = _json("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json")
+            vals = sorted({k[:-11] for k in data.get("promos", {}) if k.endswith("-recommended")}, reverse=True)
+            return vals[:limit] or versions("vanilla", limit)
+        if kind == "neoforge":
+            data = _json("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")
+            builds = data if isinstance(data, list) else data.get("versions", [])
+            vals = []
+            for build in builds:
+                p = str(build).split(".")
+                if len(p) >= 2 and p[0].isdigit() and p[1].isdigit():
+                    mc = p[0] + "." + p[1]
+                    if mc not in vals:
+                        vals.append(mc)
+            return vals[:limit] or versions("vanilla", limit)
+        return versions("vanilla", limit)
+    except Exception:
         data = _json("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
         return [x["id"] for x in data.get("versions", []) if x.get("type") == "release"][:limit]
-    if kind == "paper":
-        data = _json("https://api.papermc.io/v2/projects/paper")
-        return list(reversed(data.get("versions", [])))[:limit]
-    if kind == "forge":
-        data = _json("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json")
-        return sorted({k[:-11] for k in data.get("promos", {}) if k.endswith("-recommended")}, reverse=True)[:limit]
-    if kind == "neoforge":
-        data = _json("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")
-        vals = []
-        for build in data if isinstance(data, list) else data.get("versions", []):
-            p = str(build).split(".")
-            mc = p[0] + "." + p[1] if len(p) >= 2 and p[0].isdigit() and p[1].isdigit() else None
-            if mc and mc not in vals:
-                vals.append(mc)
-        return vals[:limit]
-    return []
 
 def create(name, kind, version, ram="4G", java="java"):
     if not safe_name(name):
