@@ -4,6 +4,7 @@ from . import instances, core
 
 SERVERS_DIR = os.path.join(instances.LAUNCHERS_ROOT, "servers")
 SERVER_TYPES = ("Vanilla", "Paper", "Fabric", "Forge", "NeoForge")
+MAX_SERVERS = 2
 PROCESSES, CALLBACKS = {}, {}
 
 def safe_name(name):
@@ -55,6 +56,9 @@ def _request(url, load_json=True, dest=None):
 def list_servers():
     os.makedirs(SERVERS_DIR, exist_ok=True)
     return [n for n in sorted(os.listdir(SERVERS_DIR)) if os.path.isfile(os.path.join(SERVERS_DIR, n, "blemm-server.json"))]
+
+def server_limit_reached():
+    return len(list_servers()) >= MAX_SERVERS
 
 def load(name):
     with open(os.path.join(root(name), "blemm-server.json"), encoding="utf-8") as f: return json.load(f)
@@ -226,6 +230,9 @@ def create(name, kind, version, ram="4G", java="java"):
     if not safe_name(name): raise RuntimeError("Invalid server name.")
     if not version: raise RuntimeError("Select a version.")
     d = root(name)
+    existing = list_servers()
+    if name not in existing and len(existing) >= MAX_SERVERS:
+        raise RuntimeError("You can only have " + str(MAX_SERVERS) + " servers. Delete an existing server before creating another.")
     if os.path.exists(d) and os.listdir(d): raise RuntimeError("That server already exists and contains files.")
     os.makedirs(d, exist_ok=True)
     kind, version = str(kind).lower(), str(version)
