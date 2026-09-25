@@ -95,6 +95,17 @@ def save_cfg(name, cfg):
         json.dump(cfg, f, indent=2)
 
 
+def install_vanilla(mc_version):
+    """Download and prepare a real Mojang client version."""
+    from . import core
+    m = core.manifest()
+    vid = core.resolve_version(mc_version, m)
+    vj = core.load_version_json(vid, m)
+    core.install_libraries(vj)
+    core.install_assets(vj)
+    return vid
+
+
 def create(name, version, loader=None, ram="4G", username="Blemm", build=None):
     if not isafe(name):
         raise RuntimeError("bad instance name '" + str(name) + "'")
@@ -483,11 +494,24 @@ def modrinth_search(query, mc_version, loader=None, project_type="mod"):
     if pt == "mod" and loader:
         facets.append(["categories:" + str(loader).lower().strip()])
 
-    data = _modrinth_json("/search", {
-        "limit": "12",
-        "query": query or "",
-        "facets": json.dumps(facets, separators=(",", ":"))
-    })
+    try:
+        data = _modrinth_json("/search", {
+            "limit": "12",
+            "query": query or "",
+            "facets": json.dumps(facets, separators=(",", ":"))
+        })
+    except Exception:
+        data = None
+
+    if not data or not data.get("hits"):
+        fallback = _modrinth_json("/search", {
+            "limit": "12",
+            "query": query or "",
+            "facets": json.dumps([["project_type:" + pt]], separators=(",", ":"))
+        })
+        hits = fallback.get("hits", [])
+    else:
+        hits = data.get("hits", [])
 
     return [
         {
