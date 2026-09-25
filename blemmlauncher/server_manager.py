@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog, scrolledtext
 
 from Dev import auth as dev_auth
+from . import server
 
 BG = "#07110b"
 CARD = "#102218"
@@ -30,6 +31,7 @@ class OwnerServerManager:
         self.path = ""
         self.agents = []
         self.servers = []
+        self.local = bool((getattr(app, "_dev_identity", None) or {}).get("role") == "owner")
 
         self.status = tk.StringVar(value="Loading…")
         self.server_var = tk.StringVar()
@@ -113,6 +115,77 @@ class OwnerServerManager:
         self.editor.pack(fill="both", expand=True, padx=10, pady=(0,10))
 
     def call(self, action, payload, callback):
+        if self.local:
+            def local_worker():
+                try:
+                    name = str(payload.get("server", "")).strip()
+                    if action == "status":
+                        rows = []
+                        for n in server.list_servers():
+                            try:
+                                cfg = server.load(n)
+                                rows.append({"name": n, "running": bool(server.running(n)), "type": cfg.get("type"), "version": cfg.get("version"), "ram": cfg.get("ram")})
+                            except Exception:
+                                rows.append({"name": n, "running": bool(server.running(n))})
+                        result = {"servers": rows}
+                    elif action == "start":
+                        server.start(name, lambda n, line: None)
+                        result = {"server": name, "running": True}
+                    elif action == "stop":
+                        server.stop(name)
+                        result = {"server": name, "running": False}
+                    elif action == "restart":
+                        server.stop(name)
+                        time.sleep(1.5)
+                        server.start(name, lambda n, line: None)
+                        result = {"server": name, "running": True}
+                    elif action == "logs":
+                        result = {"server": name, "lines": []}
+                    elif action == "create_server":
+                        result = server.create(name, str(payload.get("type", "paper")).strip().lower(), str(payload.get("version", "")).strip(), ram=str(payload.get("ram", "4G")).strip() or "4G")
+                    elif action == "files":
+                        rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+                        result = {"server": name, "path": rel, "files": server.tree(name, rel)}
+                    elif action == "read_file":
+                        rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+                        result = {"server": name, "path": rel, "content": server.read_file(name, rel)}
+                    elif action == "write_file":
+                        rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+                        content = str(payload.get("content", ""))
+                        if len(content.encode("utf-8")) > 5 * 1024 * 1024:
+                            raise RuntimeError("Remote editor writes are limited to 5 MB.")
+                        server.write_file(name, rel, content)
+                        result = {"server": name, "path": rel, "saved": True}
+                    elif action == "create_folder":
+                        rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+                        server.create_folder(name, rel)
+                        result = {"server": name, "path": rel, "created": True}
+                    elif action == "create_file":
+                        rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+                        server.create_file(name, rel, str(payload.get("content", "")))
+                        result = {"server": name, "path": rel, "created": True}
+                    elif action == "delete_file":
+                        rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+                        if not rel:
+                            raise RuntimeError("Cannot delete the server root.")
+                        server.remove(name, rel)
+                        result = {"server": name, "path": rel, "deleted": True}
+                    elif action == "rename_file":
+                        old = str(payload.get("old", "")).replace("\\", "/").strip("/")
+                        new = str(payload.get("new", "")).replace("\\", "/").strip("/")
+                        server.rename(name, old, new)
+                        result = {"server": name, "old": old, "new": new}
+                    elif action == "delete_server":
+                        server.delete(name)
+                        result = {"server": name, "deleted": True}
+                    else:
+                        raise RuntimeError("Unsupported local server action: " + action)
+                    self.win.after(0, lambda r=result: callback(r, None))
+                except Exception as exc:
+                    self.win.after(0, lambda e=str(exc): callback(None, e))
+            threading.Thread(target=local_worker, daemon=True).start()
+            return
+
         token = self.app._remote_token()
         if not token:
             callback(None, "Developer authentication has expired. Please log in again.")
@@ -162,6 +235,15 @@ class OwnerServerManager:
         self.refresh_servers()
 
     def refresh_agents(self):
+        if self.local:
+            self.agents = [{"id": "local-owner-pc", "name": "This PC", "status": "online", "owner_username": "Blemm"}]
+            self.agent_box["values"] = ["This PC • ONLINE"]
+            self.agent_box.current(0)
+            self.agent = "local-owner-pc"
+            self.status.set("This PC connected • Owner access")
+            self.refresh_servers()
+            return
+
         token = self.app._remote_token()
         if not token:
             self.status.set("Developer authentication has expired.")
