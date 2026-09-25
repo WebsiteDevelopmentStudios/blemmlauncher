@@ -149,6 +149,8 @@ class App:
         self._ram = tk.StringVar(value="4G")
         self._optifine = tk.BooleanVar(value=False)
         self._dev_identity = None
+        self._dev_username = tk.StringVar()
+        self._dev_password = tk.StringVar()
 
         self._build_header()
         self._build_tabs()
@@ -454,12 +456,31 @@ class App:
         dev_card = ttk.Frame(tab, style="Card.TFrame", padding=24)
         dev_card.grid(row=1, column=0, sticky="new", padx=8, pady=(4, 8))
         ttk.Label(dev_card, text="Developer Access", style="Big.TLabel").pack(anchor="w")
+        ttk.Label(
+            dev_card,
+            text="Developer-only login. Credentials are checked by the Cloudflare Worker.",
+            style="MutedCard.TLabel",
+            wraplength=700
+        ).pack(anchor="w", pady=(4, 14))
+
         self._dev_status_label = ttk.Label(
             dev_card,
             text="Not authenticated",
             style="MutedCard.TLabel"
         )
-        self._dev_status_label.pack(anchor="w", pady=(4, 12))
+        self._dev_status_label.pack(anchor="w", pady=(0, 12))
+
+        ttk.Label(dev_card, text="Developer username", style="MutedCard.TLabel").pack(anchor="w")
+        ttk.Entry(dev_card, textvariable=self._dev_username, width=32).pack(anchor="w", pady=(5, 10))
+
+        ttk.Label(dev_card, text="Developer password", style="MutedCard.TLabel").pack(anchor="w")
+        ttk.Entry(
+            dev_card,
+            textvariable=self._dev_password,
+            show="•",
+            width=32
+        ).pack(anchor="w", pady=(5, 12))
+
         self._dev_login_button = ttk.Button(
             dev_card,
             text="Developer Login",
@@ -467,20 +488,30 @@ class App:
             command=self._developer_login
         )
         self._dev_login_button.pack(anchor="w")
+
         ttk.Label(
             dev_card,
-            text="Uses Cloudflare Access. No developer password is stored in the launcher.",
+            text="The password is sent over HTTPS and is not saved in the launcher.",
             style="MutedCard.TLabel",
             wraplength=700
         ).pack(anchor="w", pady=(10, 0))
 
     def _developer_login(self):
-        self._dev_login_button.config(state="disabled", text="Opening browser…")
-        self._dev_status_label.config(text="Waiting for Cloudflare authentication…")
+        username = self._dev_username.get().strip()
+        password = self._dev_password.get()
+        if not username or not password:
+            self._dev_status_label.config(
+                text="Enter your developer username and password.",
+                foreground=DANGER
+            )
+            return
+
+        self._dev_login_button.config(state="disabled", text="Signing in…")
+        self._dev_status_label.config(text="Authenticating…", foreground=MUTED)
 
         def worker():
             try:
-                identity = dev_auth.login()
+                identity = dev_auth.login(username, password)
                 self.q.put(("dev_login", identity, None, None))
             except Exception as exc:
                 self.q.put(("dev_login_error", str(exc), None, None))
@@ -2433,9 +2464,9 @@ class App:
 
                 elif kind == "dev_login":
                     self._dev_identity = text
-                    email = str((text or {}).get("email", "Developer"))
+                    username = str((text or {}).get("username", "Developer"))
                     self._dev_status_label.config(
-                        text="Authenticated • " + email,
+                        text="Authenticated • " + username,
                         foreground=SUCCESS
                     )
                     self._dev_login_button.config(
@@ -2446,7 +2477,7 @@ class App:
                         text="Developer authentication successful",
                         foreground=SUCCESS
                     )
-                    self.log_message("Developer authenticated: " + email)
+                    self.log_message("Developer authenticated: " + username)
 
                 elif kind == "dev_login_error":
                     self._dev_status_label.config(
