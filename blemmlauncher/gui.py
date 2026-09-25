@@ -9,9 +9,13 @@ import subprocess
 import socket
 import sys
 import time
+import io
+import urllib.request
 import tkinter as tk
 import webbrowser
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
+
+from PIL import Image, ImageTk
 
 from . import core, instances, server
 from .server_manager import OwnerServerManager
@@ -140,6 +144,8 @@ class App:
         self._all_versions = []
         self._modrinth_hits = []
         self._modrinth_searching = False
+        self._modrinth_home_loaded = False
+        self._modrinth_image_refs = {}
         self._server_name = None
         self._server_path = ""
         self._server_edit_path = None
@@ -318,7 +324,7 @@ class App:
 
             canvas.create_rounded_rectangle if False else None
             # Rounded pill using overlapping rectangles + circles.
-            x1, y1, x2, y2, r = 2, 2, 213, 42, 14
+            x1, y1, x2, y2, r = 2, 2, 213, 42, 4
             canvas.create_rectangle(x1+r, y1, x2-r, y2, fill=fill, outline="")
             canvas.create_rectangle(x1, y1+r, x2, y2-r, fill=fill, outline="")
             canvas.create_oval(x1, y1, x1+2*r, y1+2*r, fill=fill, outline="")
@@ -355,6 +361,8 @@ class App:
             self._new_server_dialog()
             return
         page.lift()
+        if name == "Modrinth" and not self._modrinth_home_loaded:
+            self.root.after(50, self._load_modrinth_home)
         self._page_name = name
         self.current_page.config(text=name)
         self._refresh_nav_buttons()
@@ -371,7 +379,7 @@ class App:
             # click/hover-neutral repaint.
             canvas.delete("all")
             fill = GREEN_DARK if active else "#0d1e14"
-            x1, y1, x2, y2, r = 2, 2, 213, 42, 14
+            x1, y1, x2, y2, r = 2, 2, 213, 42, 4
             for args in [
                 (x1+r, y1, x2-r, y2),
                 (x1, y1+r, x2, y2-r),
@@ -1268,7 +1276,7 @@ class App:
         )
         ttk.Label(
             top,
-            text="Browse compatible projects like a real in-launcher marketplace.",
+            text="Discover mods, modpacks, shaders, resource packs and more — without leaving BlemmLauncher.",
             style="MutedCard.TLabel"
         ).grid(row=1, column=0, sticky="w", pady=(2, 9))
 
@@ -1280,12 +1288,17 @@ class App:
         )
         ttk.Combobox(
             searchbar, textvariable=self.modrinth_type,
-            values=["mod", "modpack", "shader", "resourcepack", "datapack", "world"], state="readonly", width=18
+            values=["mod", "modpack", "shader", "resourcepack", "datapack", "world"],
+            state="readonly", width=18
         ).grid(row=0, column=1, padx=7)
         ttk.Button(
             searchbar, text="Search", style="Primary.TButton",
             command=self.modrinth_search
         ).grid(row=0, column=2)
+        ttk.Button(
+            searchbar, text="Discover",
+            command=self._show_modrinth_home
+        ).grid(row=0, column=3, padx=(7, 0))
 
         ttk.Label(top, text="Install into", style="MutedCard.TLabel").grid(
             row=3, column=0, sticky="w", pady=(9, 2)
@@ -1300,11 +1313,10 @@ class App:
         body.columnconfigure(0, weight=1)
         body.rowconfigure(0, weight=1)
 
-        canvas = tk.Canvas(
-            body, bg=CARD, highlightthickness=0, borderwidth=0
-        )
+        canvas = tk.Canvas(body, bg=CARD, highlightthickness=0, borderwidth=0)
         scrollbar = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
         self.modrinth_cards = ttk.Frame(canvas, style="Card.TFrame")
+        self._modrinth_cards_root = self.modrinth_cards
         self.modrinth_cards.bind(
             "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
@@ -1315,18 +1327,12 @@ class App:
         self.modrinth_canvas = canvas
 
         self.modrinth_message = ttk.Label(
-            self.modrinth_cards,
-            text="Search Modrinth to see projects.",
-            style="MutedCard.TLabel"
-        )
-        self.modrinth_message.pack(anchor="w", padx=18, pady=18)
-
-    def _store_card(self, hit, target_name, mc_version, loader, ptype):
+            self.modrinth_cards,    def _store_card(self, hit, target_name, mc_version, loader, ptype):
         card = tk.Frame(
             self.modrinth_cards, bg=CARD, highlightthickness=1,
-            highlightbackground=GREEN_DARK, bd=0
+            highlightbackground="#183222", bd=0
         )
-        card.pack(fill="x", padx=12, pady=7, ipady=3)
+        card.pack(fill="x", padx=12, pady=5, ipady=4)
         card.columnconfigure(1, weight=1)
 
         title = hit.get("title", "Unknown")
@@ -1334,31 +1340,43 @@ class App:
         downloads = hit.get("downs", 0)
         desc = hit.get("desc", "") or "No description available."
 
-        badge = tk.Label(
-            card, text=ptype.upper(), bg=GREEN_DARK, fg=ACCENT,
-            font=("Segoe UI", 8, "bold"), width=10, pady=12
+        image_box = tk.Frame(card, bg="#0c1711", width=78, height=78)
+        image_box.grid(row=0, column=0, rowspan=3, padx=(10, 12), pady=8)
+        image_box.grid_propagate(False)
+        image_label = tk.Label(
+            image_box, text=ptype.upper()[:3], bg="#102218", fg=ACCENT,
+            font=("Segoe UI", 9, "bold")
         )
-        badge.grid(row=0, column=0, rowspan=3, padx=(12, 14), pady=8)
+        image_label.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._modrinth_image(image_label, hit.get("icon"), 68)
 
         tk.Label(
             card, text=title, bg=CARD, fg=FG,
-            font=("Segoe UI", 13, "bold"), anchor="w"
-        ).grid(row=0, column=1, sticky="ew", pady=(9, 1))
+            font=("Segoe UI", 12, "bold"), anchor="w"
+        ).grid(row=0, column=1, sticky="ew", pady=(8, 1))
         ttk.Label(
             card,
             text="by " + author + "  •  " + f"{downloads:,}" + " downloads  •  " + ptype,
             style="MutedCard.TLabel"
-        ).grid(row=1, column=1, sticky="w", pady=(1, 5))
+        ).grid(row=1, column=1, sticky="w", pady=(1, 3))
         ttk.Label(
             card, text=desc, style="MutedCard.TLabel",
-            wraplength=600, justify="left"
+            wraplength=620, justify="left"
         ).grid(row=2, column=1, sticky="w")
+
         ttk.Button(
             card, text="INSTALL", style="Primary.TButton",
             command=lambda h=hit: self._install_modrinth(
                 h, target_name, mc_version, loader, ptype
             )
         ).grid(row=0, column=2, rowspan=3, padx=(12, 14))
+
+        def open_project(_event=None, project_id=hit.get("id")):
+            if project_id:
+                webbrowser.open("https://modrinth.com/" + str(ptype) + "/" + str(project_id))
+
+        for widget in (card, image_box, image_label):
+            widget.bind("<Double-Button-1>", open_project)
 
     def modrinth_search(self):
         target = self.modrinth_target.get().strip()
@@ -1381,9 +1399,12 @@ class App:
         loader = cfg.get("loader")
 
         self._modrinth_searching = True
-        self.modrinth_message.config(text="Searching Modrinth…")
-        for child in self.modrinth_cards.winfo_children():
-            child.destroy()
+        self._modrinth_clear_cards()
+        ttk.Label(
+            self.modrinth_cards,
+            text="Searching Modrinth…",
+            style="MutedCard.TLabel"
+        ).pack(anchor="w", padx=18, pady=18)
 
         def worker():
             try:
@@ -2825,6 +2846,54 @@ class App:
                     )
                     self._refresh_list()
                     self._select_instance(name)
+
+                elif kind == "modrinth_home_results":
+                    mc_version, sections = text
+                    self._modrinth_searching = False
+                    self._modrinth_home_loaded = True
+                    self._modrinth_clear_cards()
+                    ttk.Label(
+                        self.modrinth_cards,
+                        text="Discover • Minecraft " + str(mc_version),
+                        style="Accent.TLabel"
+                    ).pack(anchor="w", padx=18, pady=(16, 6))
+                    for section_title, ptype, hits in sections:
+                        section = ttk.Frame(self.modrinth_cards, style="Card.TFrame")
+                        section.pack(fill="x", padx=10, pady=(8, 4))
+                        ttk.Label(
+                            section, text=section_title,
+                            style="Big.TLabel"
+                        ).pack(anchor="w", padx=8, pady=(4, 4))
+                        if not hits:
+                            ttk.Label(
+                                section, text="Nothing found for this version.",
+                                style="MutedCard.TLabel"
+                            ).pack(anchor="w", padx=8, pady=(0, 8))
+                            continue
+                        for hit in hits:
+                            # Re-parent the card into this section temporarily.
+                            self.modrinth_cards = section
+                            self._store_card(
+                                hit, self.modrinth_target.get().strip(),
+                                mc_version,
+                                (instances.load_cfg(self.modrinth_target.get().strip()).get("loader")
+                                 if self.modrinth_target.get().strip() else None),
+                                ptype
+                            )
+                        self.modrinth_cards = self._modrinth_cards_root
+                    # Restore the actual scroll content frame.
+                    # Cards above were created in each section, so keep the root frame reference.
+                    self.modrinth_cards = self._modrinth_cards_root
+                    self.status.config(
+                        text="Modrinth Discover loaded", foreground=SUCCESS
+                    )
+
+                elif kind == "modrinth_image":
+                    parent, key, photo = text
+                    if parent is not None and parent.winfo_exists():
+                        parent.configure(image=photo, text="")
+                        parent.image = photo
+                        self._modrinth_image_refs[key] = photo
 
                 elif kind == "modrinth_results":
                     hits, target, mc_version, loader, ptype = text
