@@ -140,6 +140,30 @@ def _server_port(name):
     return port
 
 
+def _domain_slug(name):
+    value = re.sub(r"[^a-z0-9]+", "-", str(name).strip().lower()).strip("-")
+    return value or "server"
+
+
+def domain_info(name, suffix="is-a.dev"):
+    """Build a safe free-domain candidate from the server name.
+
+    The harys722/free-domains repository is a directory of free-domain
+    providers, not itself a DNS registration API. The returned hostname is a
+    candidate that the user can register with the selected provider.
+    """
+    suffix = str(suffix or "").strip().lower().strip(".")
+    if not suffix or not re.fullmatch(r"[a-z0-9.-]+", suffix):
+        raise RuntimeError("Invalid domain suffix.")
+    slug = _domain_slug(name)
+    return {
+        "slug": slug,
+        "suffix": suffix,
+        "domain": slug + "." + suffix,
+        "status": "Candidate only — register this hostname with the provider before using it. DNS must point to your public server IP.",
+    }
+
+
 def network_info(name):
     """Return addresses useful for connecting to a local server."""
     import socket
