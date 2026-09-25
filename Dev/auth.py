@@ -61,6 +61,28 @@ def login(username: str, password: str) -> Optional[dict]:
 
     return data
 
+def list_developers(token: str) -> list[dict]:
+    return _request("/developers", "GET", token=token).get("developers", [])
+
+
+def create_developer(token: str, username: str, password: str) -> dict:
+    return _request("/developers", "POST", {"username": username, "password": password}, token)
+
+
+def reset_developer_password(token: str, username: str, password: str) -> dict:
+    from urllib.parse import quote
+    return _request(
+        "/developers/" + quote(username, safe="") + "/reset",
+        "POST",
+        {"password": password},
+        token,
+    )
+
+
+def delete_developer(token: str, username: str) -> dict:
+    from urllib.parse import quote
+    return _request("/developers/" + quote(username, safe=""), "DELETE", token=token)
+
 
 if __name__ == "__main__":
     import getpass
