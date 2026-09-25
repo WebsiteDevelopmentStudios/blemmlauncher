@@ -607,25 +607,59 @@ class App:
 
         self._developer_owner_frame = ttk.Frame(card, style="Card.TFrame")
         ttk.Label(self._developer_owner_frame, text="Owner controls", style="Accent.TLabel").pack(anchor="w")
-        owner_actions = ttk.Frame(self._developer_owner_frame, style="Card.TFrame")
+        # Use classic Tk buttons here instead of themed ttk buttons. Some Windows
+        # ttk themes can render the owner-control text incorrectly/blank.
+        owner_actions = tk.Frame(self._developer_owner_frame, bg=CARD)
         owner_actions.pack(fill="x", pady=(8, 8))
-        ttk.Button(owner_actions, text="Refresh Developers", command=self._developer_refresh).pack(side="left")
-        ttk.Button(owner_actions, text="+ Create Developer", style="Primary.TButton",
-                   command=self._developer_create).pack(side="left", padx=(8, 0))
+
+        def owner_button(parent, text, command, primary=False):
+            return tk.Button(
+                parent,
+                text=text,
+                command=command,
+                bg=ACCENT2 if primary else FIELD,
+                fg="#04130a" if primary else FG,
+                activebackground=GREEN_SOFT if primary else GREEN_DARK,
+                activeforeground="#04130a" if primary else FG,
+                relief="flat",
+                bd=0,
+                highlightthickness=0,
+                padx=14,
+                pady=8,
+                font=("Segoe UI", 9, "bold"),
+                cursor="hand2",
+            )
+
+        owner_button(owner_actions, "Refresh Developers", self._developer_refresh).pack(side="left")
+        owner_button(
+            owner_actions, "+ Create Developer", self._developer_create, primary=True
+        ).pack(side="left", padx=(8, 0))
+
+        tree_frame = tk.Frame(self._developer_owner_frame, bg=CARD)
+        tree_frame.pack(fill="x", pady=(0, 8))
 
         self._developer_tree = ttk.Treeview(
-            self._developer_owner_frame, columns=("username", "role", "created"),
+            tree_frame, columns=("username", "role", "created"),
             show="headings", height=7
         )
-        for col, title, width in (("username", "Username", 220), ("role", "Role", 120), ("created", "Created", 220)):
+        for col, title, width in (
+            ("username", "Username", 220),
+            ("role", "Role", 120),
+            ("created", "Created", 220),
+        ):
             self._developer_tree.heading(col, text=title)
             self._developer_tree.column(col, width=width)
-        self._developer_tree.pack(fill="x", pady=(0, 8))
+        self._developer_tree.pack(fill="x")
 
-        actions = ttk.Frame(self._developer_owner_frame, style="Card.TFrame")
+        actions = tk.Frame(self._developer_owner_frame, bg=CARD)
         actions.pack(fill="x")
-        ttk.Button(actions, text="Reset Selected Password", command=self._developer_reset).pack(side="left")
-        ttk.Button(actions, text="Delete Selected", command=self._developer_delete).pack(side="left", padx=(8, 0))
+
+        owner_button(
+            actions, "Reset Selected Password", self._developer_reset
+        ).pack(side="left")
+        owner_button(
+            actions, "Delete Selected", self._developer_delete
+        ).pack(side="left", padx=(8, 0))
 
         self._developer_nonowner_label = ttk.Label(
             card,
