@@ -206,6 +206,7 @@ class App:
         self.server_tab = tk.Frame(self.content_area, bg=BG)
         self.profile_tab = tk.Frame(self.content_area, bg=BG)
         self.log_tab = tk.Frame(self.content_area, bg=BG)
+        self.developer_tab = tk.Frame(self.content_area, bg=BG)
 
         self.pages = {
             "Play": self.play_tab,
@@ -214,6 +215,7 @@ class App:
             "Server": self.server_tab,
             "Profile": self.profile_tab,
             "Logs": self.log_tab,
+            "Developer": self.developer_tab,
         }
 
         for page in self.pages.values():
@@ -225,6 +227,7 @@ class App:
         self._build_server_tab()
         self._build_profile_tab()
         self._build_log_tab()
+        self._build_developer_tab()
 
         self._build_navigation()
         self.show_page("Play")
@@ -333,6 +336,8 @@ class App:
         setattr(self, "_nav_" + name.lower(), canvas)
 
     def show_page(self, name):
+        if name == "Developer" and not self._dev_identity:
+            return
         page = self.pages.get(name)
         if page is None:
             return
@@ -516,6 +521,160 @@ class App:
             except Exception as exc:
                 self.q.put(("dev_login_error", str(exc), None, None))
 
+        threading.Thread(target=worker, daemon=True).start()
+
+
+    def _build_developer_tab(self):
+        tab = self.developer_tab
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(0, weight=1)
+        card = ttk.Frame(tab, style="Card.TFrame", padding=24)
+        card.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+
+        ttk.Label(card, text="Developer", style="Big.TLabel").pack(anchor="w")
+        self._developer_identity_label = ttk.Label(
+            card, text="Developer access", style="MutedCard.TLabel"
+        )
+        self._developer_identity_label.pack(anchor="w", pady=(4, 14))
+
+        self._developer_owner_frame = ttk.Frame(card, style="Card.TFrame")
+        ttk.Label(self._developer_owner_frame, text="Owner controls",
+                  style="Accent.TLabel").pack(anchor="w")
+        owner_actions = ttk.Frame(self._developer_owner_frame, style="Card.TFrame")
+        owner_actions.pack(fill="x", pady=(8, 12))
+        ttk.Button(owner_actions, text="Refresh Developers",
+                   command=self._developer_refresh).pack(side="left")
+        ttk.Button(owner_actions, text="+ Create Developer",
+                   style="Primary.TButton",
+                   command=self._developer_create).pack(side="left", padx=(8, 0))
+
+        self._developer_tree = ttk.Treeview(
+            self._developer_owner_frame,
+            columns=("username", "role", "created"),
+            show="headings", height=12
+        )
+        for col, title, width in (
+            ("username", "Username", 220),
+            ("role", "Role", 120),
+            ("created", "Created", 220),
+        ):
+            self._developer_tree.heading(col, text=title)
+            self._developer_tree.column(col, width=width)
+        self._developer_tree.pack(fill="both", expand=True, pady=(0, 10))
+
+        actions = ttk.Frame(self._developer_owner_frame, style="Card.TFrame")
+        actions.pack(fill="x")
+        ttk.Button(actions, text="Reset Selected Password",
+                   command=self._developer_reset).pack(side="left")
+        ttk.Button(actions, text="Delete Selected",
+                   command=self._developer_delete).pack(side="left", padx=(8, 0))
+
+        self._developer_nonowner_label = ttk.Label(
+            card,
+            text="You are authenticated as a developer. Owner-only account management is hidden.",
+            style="MutedCard.TLabel", wraplength=700
+        )
+
+    def _show_developer_controls(self):
+        if not self._dev_identity:
+            return
+        username = str(self._dev_identity.get("username", "Developer"))
+        role = str(self._dev_identity.get("role", "developer"))
+        self._developer_identity_label.config(
+            text="Signed in as " + username + " • " + role.upper(),
+            foreground=SUCCESS
+        )
+        if role == "owner":
+            self._developer_nonowner_label.pack_forget()
+            self._developer_owner_frame.pack(fill="both", expand=True)
+            self._developer_refresh()
+        else:
+            self._developer_owner_frame.pack_forget()
+            self._developer_nonowner_label.pack(anchor="w", pady=(8, 0))
+
+    def _add_developer_nav(self):
+        if getattr(self, "_developer_nav_added", False):
+            return
+        self._nav_button("Developer", "⚙")
+        self._developer_nav_added = True
+        self._refresh_nav_buttons()
+
+    def _developer_refresh(self):
+        if not self._dev_identity or self._dev_identity.get("role") != "owner":
+            return
+        token = self._dev_identity.get("token", "")
+        def worker():
+            try:
+                rows = dev_auth.list_developers(token)
+                self.q.put(("developer_list", rows, None, None))
+            except Exception as exc:
+                self.q.put(("developer_error", str(exc), None, None))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _developer_create(self):
+        if not self._dev_identity or self._dev_identity.get("role") != "owner":
+            return
+        username = simpledialog.askstring("Create Developer", "Developer username:", parent=self.root)
+        if not username:
+            return
+        password = simpledialog.askstring(
+            "Create Developer", "Temporary password (8+ characters):",
+            parent=self.root, show="•"
+        )
+        if not password:
+            return
+        token = self._dev_identity.get("token", "")
+        def worker():
+            try:
+                result = dev_auth.create_developer(token, username.strip(), password)
+                self.q.put(("developer_created", result, None, None))
+            except Exception as exc:
+                self.q.put(("developer_error", str(exc), None, None))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _selected_developer(self):
+        if not hasattr(self, "_developer_tree"):
+            return None
+        selection = self._developer_tree.selection()
+        if not selection:
+            return None
+        values = self._developer_tree.item(selection[0], "values")
+        return values[0] if values else None
+
+    def _developer_reset(self):
+        username = self._selected_developer()
+        if not username or username.lower() == "blemm":
+            messagebox.showinfo("Developer", "Select a non-owner developer account.")
+            return
+        password = simpledialog.askstring(
+            "Reset Password", "New password for " + username + ":",
+            parent=self.root, show="•"
+        )
+        if not password:
+            return
+        token = self._dev_identity.get("token", "")
+        def worker():
+            try:
+                dev_auth.reset_developer_password(token, username, password)
+                self.q.put(("developer_created", {"username": username}, None, None))
+            except Exception as exc:
+                self.q.put(("developer_error", str(exc), None, None))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _developer_delete(self):
+        username = self._selected_developer()
+        if not username or username.lower() == "blemm":
+            messagebox.showinfo("Developer", "Select a non-owner developer account.")
+            return
+        if not messagebox.askyesno("Delete Developer", "Delete '" + username + "'?", parent=self.root):
+            return
+        token = self._dev_identity.get("token", "")
+        def worker():
+            try:
+                dev_auth.delete_developer(token, username)
+                self.q.put(("developer_deleted", username, None, None))
+            except Exception as exc:
+                self.q.put(("developer_error", str(exc), None, None))
         threading.Thread(target=worker, daemon=True).start()
 
     def _build_status(self):
@@ -2473,6 +2632,8 @@ class App:
                         state="normal",
                         text="Developer Authenticated"
                     )
+                    self._add_developer_nav()
+                    self._show_developer_controls()
                     self.status.config(
                         text="Developer authentication successful",
                         foreground=SUCCESS
@@ -2493,6 +2654,30 @@ class App:
                         foreground=DANGER
                     )
                     self.log_message("Developer authentication failed: " + str(text))
+
+
+                elif kind == "developer_list":
+                    for item in self._developer_tree.get_children():
+                        self._developer_tree.delete(item)
+                    for row in text or []:
+                        self._developer_tree.insert(
+                            "", "end",
+                            values=(row.get("username", ""), row.get("role", "developer"),
+                                    row.get("created_at", ""))
+                        )
+                    self.status.config(text="Developer accounts refreshed", foreground=SUCCESS)
+
+                elif kind == "developer_created":
+                    self.status.config(text="Developer account updated", foreground=SUCCESS)
+                    self._developer_refresh()
+
+                elif kind == "developer_deleted":
+                    self.status.config(text="Developer deleted: " + str(text), foreground=SUCCESS)
+                    self._developer_refresh()
+
+                elif kind == "developer_error":
+                    self.status.config(text="Developer action failed", foreground=DANGER)
+                    self.log_message("Developer error: " + str(text))
 
                 elif kind == "msg":
                     self.log_message(text)
