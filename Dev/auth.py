@@ -25,6 +25,12 @@ DEV_AUTH_URL = os.environ.get(
     "https://blemmlauncher-dev-auth.wowgrayhaha.workers.dev",
 ).strip().rstrip("/")
 
+# Cloudflare can reject requests that look like an unrecognized automation
+# client. Use a stable desktop-app user agent instead of urllib's default
+# Python signature. This does not disable TLS verification or Cloudflare
+# security; it simply identifies the client normally.
+USER_AGENT = "BlemmLauncher/1.0 (Windows; Developer Authentication)"
+
 
 def _ssl_context() -> ssl.SSLContext:
     """Build a verified TLS context using certifi when available."""
@@ -44,6 +50,7 @@ def _request(
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
     }
     if token:
         headers["Authorization"] = "Bearer " + token
@@ -65,9 +72,28 @@ def _request(
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
         try:
-            detail = json.loads(exc.read().decode("utf-8"))
+            raw_error = exc.read().decode("utf-8")
+            try:
+                detail = json.loads(raw_error)
+            except json.JSONDecodeError:
+                detail = {}
         except Exception:
+            raw_error = ""
             detail = {}
+
+        # Cloudflare's block pages are HTML rather than Worker JSON. Surface
+        # that fact directly instead of reducing it to an unhelpful 403.
+        if exc.code in (403, 429) and (
+            "cloudflare" in raw_error.lower()
+            or "browser" in raw_error.lower()
+            or "blocked" in raw_error.lower()
+        ):
+            raise RuntimeError(
+                "Cloudflare blocked the launcher request before it reached the "
+                "developer authentication Worker. The Worker itself is online, "
+                "but Cloudflare security is rejecting this client."
+            ) from exc
+
         raise RuntimeError(
             detail.get("error")
             or detail.get("detail")
@@ -78,8 +104,7 @@ def _request(
         if isinstance(reason, ssl.SSLCertVerificationError):
             raise RuntimeError(
                 "Secure HTTPS verification failed for the Cloudflare developer "
-                "authentication Worker. Update the certifi package with "
-                "'python -m pip install --upgrade certifi'."
+                "authentication Worker. The launcher includes its own CA bundle."
             ) from exc
         if isinstance(reason, socket.gaierror):
             raise RuntimeError(
