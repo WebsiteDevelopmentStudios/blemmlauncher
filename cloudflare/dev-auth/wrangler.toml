@@ -1,0 +1,11 @@
+name = "blemmlauncher-dev-auth"
+main = "src/index.js"
+compatibility_date = "2026-09-25"
+
+[vars]
+CODE_TTL_SECONDS = "120"
+
+# Create the Worker secret separately:
+#   wrangler secret put DEV_AUTH_SECRET
+#
+# Do NOT put the secret in this file or in GitHub.
