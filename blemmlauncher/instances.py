@@ -467,9 +467,14 @@ def _modrinth_json(path, params=None):
 
 
 def _modrinth_project_type(ptype):
-    return {"mod": "mod", "shader": "shader", "resourcepack": "resourcepack"}.get(
-        ptype, "mod"
-    )
+    return {
+        "mod": "mod",
+        "modpack": "modpack",
+        "shader": "shader",
+        "resourcepack": "resourcepack",
+        "datapack": "datapack",
+        "world": "world",
+    }.get(ptype, "mod")
 
 
 def modrinth_search(query, mc_version, loader=None, project_type="mod"):
@@ -532,6 +537,9 @@ def modrinth_install(project_id, mc_version, loader=None, project_type="mod"):
     folder = (
         "shaderpacks" if pt == "shader"
         else "resourcepacks" if pt == "resourcepack"
+        else "datapacks" if pt == "datapack"
+        else "saves" if pt == "world"
+        else "modpacks" if pt == "modpack"
         else "mods"
     )
     dest = os.path.join(core.GAME_DIR, folder, filename)
