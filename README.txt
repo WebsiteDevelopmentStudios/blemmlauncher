@@ -1,4 +1,7 @@
-BLEMMLAUNCHER
+# You can check this for malware yourself:
+'https://www.virustotal.com/'
+
+## BLEMMLAUNCHER
 =============
 
 A custom Minecraft launcher for anyone to use.
