@@ -281,7 +281,7 @@ f.addEventListener("submit", async e => {
       return json({ created: true, username, role: "developer" });
     }
 
-    const resetMatch = url.pathname.match(/^\\/developers\\/([^/]+)\\/reset$/);
+    const resetMatch = url.pathname.match(/^\/developers\/([^/]+)\/reset$/);
     if (request.method === "POST" && resetMatch) {
       if (!(await requireOwner(request, env))) return json({ error: "Owner authorization required." }, 403);
       const username = decodeURIComponent(resetMatch[1]);
@@ -296,7 +296,7 @@ f.addEventListener("submit", async e => {
       return json({ reset: true, username });
     }
 
-    const deleteMatch = url.pathname.match(/^\\/developers\\/([^/]+)$/);
+    const deleteMatch = url.pathname.match(/^\/developers\/([^/]+)$/);
     if (request.method === "DELETE" && deleteMatch) {
       if (!(await requireOwner(request, env))) return json({ error: "Owner authorization required." }, 403);
       const username = decodeURIComponent(deleteMatch[1]);
