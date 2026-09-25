@@ -879,6 +879,21 @@ class App:
         threading.Thread(target=worker, daemon=True).start()
         self._remote_status_label.config(text="Sending " + action + "…", foreground=MUTED)
 
+    def _schedule_remote_console_refresh(self):
+        if not self.root.winfo_exists():
+            return
+        if self._remote_selected_server() and (
+            self._dev_identity and str(self._dev_identity.get("role", "")).lower() == "owner"
+        ):
+            self.root.after(2000, self._poll_owner_console)
+
+    def _poll_owner_console(self):
+        if not self.root.winfo_exists():
+            return
+        name = self._remote_selected_server()
+        if name and server.running(name):
+            self._remote_action("logs")
+
     def _remote_send_console(self):
         command = self._remote_command_entry.get().strip()
         if not command:
@@ -3193,6 +3208,7 @@ class App:
                             for line in result.get("lines", []):
                                 self._remote_console.insert("end", str(line.get("line", "")) + "\n")
                             self._remote_console.see("end")
+                            self._schedule_remote_console_refresh()
                         elif action == "read_file":
                             self._remote_console.delete("1.0", "end")
                             self._remote_console.insert("1.0", result.get("content", ""))
