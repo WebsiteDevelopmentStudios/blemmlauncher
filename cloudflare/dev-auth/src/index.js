@@ -22,10 +22,10 @@ function b64url(bytes) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-function hexToBytes(hex) {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return out;
+function decodeB64url(value) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - value.length % 4) % 4);
+  const binary = atob(normalized);
+  return Uint8Array.from(binary, c => c.charCodeAt(0));
 }
 
 async function sign(value, secret) {
@@ -153,18 +153,9 @@ export default {
 
       let claims;
       try {
-        claims = JSON.parse(new TextDecoder().decode(hexToBytes(
-          Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/") + "=="))
-            .map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join("")
-        )));
+        claims = JSON.parse(new TextDecoder().decode(decodeB64url(payload)));
       } catch {
-        try {
-          const normalized = payload.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - payload.length % 4) % 4);
-          const bytes = Uint8Array.from(atob(normalized), c => c.charCodeAt(0));
-          claims = JSON.parse(new TextDecoder().decode(bytes));
-        } catch {
-          return json({ error: "Malformed developer code." }, 401);
-        }
+        return json({ error: "Malformed developer code." }, 401);
       }
 
       const now = Math.floor(Date.now() / 1000);
