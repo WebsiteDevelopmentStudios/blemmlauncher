@@ -21,10 +21,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build tools
+      - name: Install build tools and runtime dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller
+          python -m pip install pyinstaller certifi
 
       - name: Validate Python sources
         shell: pwsh
@@ -38,6 +38,8 @@ jobs:
           pyinstaller --clean --onefile --noconsole --uac-admin `
             --name BlemmLauncher `
             --collect-submodules blemmlauncher `
+            --collect-data certifi `
+            --hidden-import certifi `
             run.py
 
       - name: Upload EXE artifact
