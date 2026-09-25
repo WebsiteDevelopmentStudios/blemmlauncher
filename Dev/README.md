@@ -1,32 +1,47 @@
-# BlemmLauncher Dev Authentication
+# BlemmLauncher Developer Authentication
 
-This folder contains the developer-only authentication layer.
+BlemmLauncher uses **Cloudflare Access + a Cloudflare Worker** for developer authentication.
 
-## First setup
+## Configure the launcher
 
-From the repository root:
+Set:
 
-```bash
-python -m Dev.auth --setup
+```text
+BLEMM_DEV_AUTH_URL=https://blemmlauncher-dev-auth.<your-account>.workers.dev
 ```
 
-It asks for:
+Do not put a Cloudflare API token, Access secret, or Worker secret in the GitHub repository.
 
-1. Developer username
-2. Password
-3. Password confirmation
+## Run the launcher
 
-Passwords are stored as salted PBKDF2-HMAC-SHA256 hashes, not plaintext.
+Open BlemmLauncher and go to:
 
-## Login
-
-```bash
-python -m Dev.auth
+```text
+Profile → Developer Access → Developer Login
 ```
 
-## Cloudflare
+A browser opens for Cloudflare Access. After authentication, the browser returns to the running launcher through a temporary localhost callback.
 
-This local login is deliberately kept separate from Cloudflare. If you use
-Cloudflare Access later, the Access identity can become the authentication
-source instead of storing developer credentials locally. Do not put a
-Cloudflare API token or password directly into this repository.
+## Cloudflare Worker
+
+The Worker source is in:
+
+```text
+cloudflare/dev-auth/
+```
+
+Deploy it with Wrangler and set the Worker secret:
+
+```bash
+wrangler login
+wrangler secret put DEV_AUTH_SECRET
+wrangler deploy
+```
+
+Then protect the Worker `/authorize` endpoint with a Cloudflare Access application and allow only the developer identity/identities you want to authorize.
+
+The launcher never receives or stores the Cloudflare password. The Worker issues a short-lived signed developer code after Access authentication.
+
+## Important
+
+The `blemm.devs.surf` hostname is a subdomain of `devs.surf`. It does not give the launcher control over the parent `devs.surf` zone. If Cloudflare requires a zone that you control for a custom hostname, use a domain/zone you actually control or use the Worker hostname while setting up the system.
