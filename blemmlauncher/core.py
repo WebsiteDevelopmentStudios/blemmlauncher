@@ -170,7 +170,64 @@ def download(url, dest, sha1=None):
     for attempt in (1, 2, 3):
         try:
             with _open(url) as r, open(tmp, "wb") as f:
-                shutil.copyfileobj(r, f)
+                total = r.headers.get("Content-Length")
+                try:
+                    total = int(total) if total else None
+                except (TypeError, ValueError):
+                    total = None
+
+                downloaded = 0
+                last_report = 0
+                chunk_size = 1024 * 256
+
+                while True:
+                    chunk = r.read(chunk_size)
+                    if not chunk:
+                        break
+
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+                    # Don't flood the GUI queue. Update roughly every
+                    # 512 KiB while still making large downloads visible.
+                    if downloaded - last_report >= 512 * 1024 or (
+                        total and downloaded >= total
+                    ):
+                        last_report = downloaded
+
+                        if total:
+                            mb = downloaded / (1024 * 1024)
+                            total_mb = total / (1024 * 1024)
+                            report(
+                                "Downloading "
+                                + os.path.basename(dest)
+                                + " — "
+                                + "{:.1f}".format(mb)
+                                + " / "
+                                + "{:.1f}".format(total_mb)
+                                + " MB",
+                                downloaded,
+                                total
+                            )
+                        else:
+                            report(
+                                "Downloading "
+                                + os.path.basename(dest)
+                                + " — "
+                                + "{:.1f}".format(downloaded / (1024 * 1024))
+                                + " MB",
+                                None,
+                                None
+                            )
+
+                if total and downloaded < total:
+                    raise RuntimeError(
+                        "download ended early: received "
+                        + str(downloaded)
+                        + " of "
+                        + str(total)
+                        + " bytes"
+                    )
 
             break
 
