@@ -494,6 +494,8 @@ class App:
             body, orient="vertical", command=self.instance_canvas.yview
         )
         self.instance_grid = tk.Frame(self.instance_canvas, bg=BG)
+        for col in range(3):
+            self.instance_grid.columnconfigure(col, weight=1, uniform="instance_cards")
 
         self.instance_grid.bind(
             "<Configure>",
@@ -583,25 +585,25 @@ class App:
         card = tk.Frame(
             self.instance_grid, bg="#0e1712",
             highlightthickness=1, highlightbackground="#17261d",
-            width=205, height=285
+            width=225, height=300
         )
         card.grid(
-            row=index // 4, column=index % 4,
+            row=index // 3, column=index % 3,
             padx=8, pady=8, sticky="nsew"
         )
         card.grid_propagate(False)
 
-        art = tk.Canvas(card, width=203, height=185, bg=c1, highlightthickness=0, bd=0)
+        art = tk.Canvas(card, width=223, height=165, bg=c1, highlightthickness=0, bd=0)
         art.pack(fill="x")
 
         # Lightweight generated artwork: sky, horizon, sun and terrain.
-        art.create_rectangle(0, 0, 203, 120, fill=c1, outline="")
-        art.create_oval(145, 18, 181, 54, fill=c2, outline="")
+        art.create_rectangle(0, 0, 223, 110, fill=c1, outline="")
+        art.create_oval(164, 16, 198, 50, fill=c2, outline="")
         art.create_polygon(
-            0, 120, 45, 76, 78, 118, 112, 70, 165, 120,
-            203, 82, 203, 185, 0, 185, fill=c3, outline=""
+            0, 110, 48, 70, 84, 108, 122, 64, 175, 110,
+            223, 74, 223, 165, 0, 165, fill=c3, outline=""
         )
-        art.create_rectangle(0, 145, 203, 185, fill="#0a130e", outline="")
+        art.create_rectangle(0, 135, 223, 165, fill="#0a130e", outline="")
         art.create_text(
             12, 15, text=loader.upper(), anchor="nw",
             fill="#d9ffe5", font=("Segoe UI", 8, "bold")
@@ -964,6 +966,7 @@ class App:
         )
         self.server_list.pack(fill="y", expand=True)
         self.server_list.bind("<<ListboxSelect>>", self._server_selected)
+        self.delete_server_btn.config(state="disabled")
         ttk.Button(left, text="Delete Server", command=self._delete_server).pack(fill="x", pady=(8, 0))
         self.server_locked_label = tk.Label(left, text="🔒 Create a server first",
                                             bg=CARD, fg=MUTED, font=("Segoe UI", 8))
@@ -975,9 +978,24 @@ class App:
         right = tk.Frame(tab, bg=BG)
         right.grid(row=1, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=1)
+        right.rowconfigure(0, weight=1)
 
-        info = ttk.Frame(right, style="Card.TFrame", padding=12)
+        self.server_selector = tk.Frame(right, bg=BG)
+        self.server_selector.place(relx=0, rely=0, relwidth=1, relheight=1)
+        tk.Label(self.server_selector, text="Choose a server", bg=BG, fg=FG,
+                 font=("Segoe UI", 18, "bold")).pack(anchor="w", padx=6, pady=(8, 2))
+        tk.Label(self.server_selector,
+                 text="Choose a server before opening its console, settings, or files.",
+                 bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", padx=6, pady=(0, 14))
+        self.server_selector_cards = tk.Frame(self.server_selector, bg=BG)
+        self.server_selector_cards.pack(fill="both", expand=True, padx=2)
+
+        self.server_workspace = tk.Frame(right, bg=BG)
+        self.server_workspace.place_forget()
+        self.server_workspace.columnconfigure(0, weight=1)
+        self.server_workspace.rowconfigure(1, weight=1)
+
+        info = ttk.Frame(self.server_workspace, style="Card.TFrame", padding=12)
         info.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         info.columnconfigure(1, weight=1)
         self.server_title = tk.Label(info, text="No server selected", bg=CARD, fg=FG,
@@ -996,7 +1014,7 @@ class App:
         self.server_stop_btn.pack(side="left", padx=3)
         ttk.Button(controls, text="Refresh Files", command=self._refresh_server_files).pack(side="left", padx=3)
 
-        notebook = ttk.Notebook(right)
+        notebook = ttk.Notebook(self.server_workspace)
         notebook.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
         self.server_console_tab = ttk.Frame(notebook, style="Card.TFrame")
         self.server_files_tab = ttk.Frame(notebook, style="Card.TFrame")
@@ -1100,6 +1118,46 @@ class App:
 
         self._refresh_servers()
 
+    def _show_server_selector(self):
+        self.server_workspace.place_forget()
+        self.server_selector.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+    def _show_server_workspace(self):
+        self.server_selector.place_forget()
+        self.server_workspace.place(relx=0, rely=0, relwidth=1, relheight=1)
+
+    def _rebuild_server_selector(self):
+        if not hasattr(self, "server_selector_cards"):
+            return
+        for child in self.server_selector_cards.winfo_children():
+            child.destroy()
+        names = server.list_servers()
+        if not names:
+            tk.Label(self.server_selector_cards,
+                     text="No servers yet.\nUse + New Server to create one.",
+                     bg=BG, fg=MUTED, font=("Segoe UI", 11),
+                     justify="left").pack(anchor="w", padx=12, pady=20)
+            return
+        for name in names:
+            try:
+                cfg = server.load(name)
+                state = "RUNNING" if server.running(name) else "STOPPED"
+                meta = f"{cfg.get('type','Server')}  •  Minecraft {cfg.get('version','?')}  •  {cfg.get('ram','4G')} RAM  •  {state}"
+            except Exception:
+                meta = "Server information unavailable"
+            card = tk.Frame(self.server_selector_cards, bg=CARD,
+                            highlightthickness=1, highlightbackground=GREEN_DARK,
+                            padx=14, pady=12)
+            card.pack(fill="x", pady=6)
+            card.columnconfigure(0, weight=1)
+            tk.Label(card, text=name, bg=CARD, fg=FG,
+                     font=("Segoe UI", 13, "bold")).grid(row=0, column=0, sticky="w")
+            tk.Label(card, text=meta, bg=CARD, fg=MUTED,
+                     font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", pady=(3, 0))
+            ttk.Button(card, text="Choose server", style="Primary.TButton",
+                       command=lambda n=name: self._load_server_panel(n)).grid(
+                           row=0, column=1, rowspan=2, padx=(18, 0))
+
     def _update_server_access(self):
         unlocked = bool(server.list_servers())
         self._server_access = unlocked
@@ -1115,18 +1173,21 @@ class App:
         if hasattr(self, "new_server_btn"):
             self.new_server_btn.config(state="disabled" if len(names) >= server.MAX_SERVERS else "normal")
         self.server_list.delete(0, "end")
+        self._rebuild_server_selector()
         for name in names:
             self.server_list.insert("end", name)
         if self._server_name in names:
             i = names.index(self._server_name)
             self.server_list.selection_set(i)
             self.server_list.see(i)
-            self._load_server_panel(self._server_name)
+            self._show_server_selector()
         elif names:
             self.server_list.selection_set(0)
-            self._load_server_panel(names[0])
+            self._server_name = None
+            self._show_server_selector()
         else:
             self._server_name = None
+            self._show_server_selector()
             self.server_title.config(text="No server selected")
             self.server_meta.config(text="Create a server to get started.")
             self._clear_server_files()
@@ -1138,6 +1199,7 @@ class App:
 
     def _load_server_panel(self, name):
         self._server_name = name
+        self._show_server_workspace()
         try:
             cfg = server.load(name)
             state = "RUNNING" if server.running(name) else "STOPPED"
