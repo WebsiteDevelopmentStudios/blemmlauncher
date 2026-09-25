@@ -10,6 +10,7 @@ import webbrowser
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 
 from . import core, instances, server
+from Dev import auth as dev_auth
 
 
 BG = "#07110b"
@@ -147,6 +148,7 @@ class App:
         self._uname = tk.StringVar(value=self._profile.get("username", "Blemm"))
         self._ram = tk.StringVar(value="4G")
         self._optifine = tk.BooleanVar(value=False)
+        self._dev_identity = None
 
         self._build_header()
         self._build_tabs()
@@ -448,6 +450,42 @@ class App:
                    command=self._save_profile).pack(side="left", padx=(10, 0))
         ttk.Label(card, text="16 characters max • letters, numbers, and underscores.",
                   style="MutedCard.TLabel").pack(anchor="w")
+
+        dev_card = ttk.Frame(tab, style="Card.TFrame", padding=24)
+        dev_card.grid(row=1, column=0, sticky="new", padx=8, pady=(4, 8))
+        ttk.Label(dev_card, text="Developer Access", style="Big.TLabel").pack(anchor="w")
+        self._dev_status_label = ttk.Label(
+            dev_card,
+            text="Not authenticated",
+            style="MutedCard.TLabel"
+        )
+        self._dev_status_label.pack(anchor="w", pady=(4, 12))
+        self._dev_login_button = ttk.Button(
+            dev_card,
+            text="Developer Login",
+            style="Primary.TButton",
+            command=self._developer_login
+        )
+        self._dev_login_button.pack(anchor="w")
+        ttk.Label(
+            dev_card,
+            text="Uses Cloudflare Access. No developer password is stored in the launcher.",
+            style="MutedCard.TLabel",
+            wraplength=700
+        ).pack(anchor="w", pady=(10, 0))
+
+    def _developer_login(self):
+        self._dev_login_button.config(state="disabled", text="Opening browser…")
+        self._dev_status_label.config(text="Waiting for Cloudflare authentication…")
+
+        def worker():
+            try:
+                identity = dev_auth.login()
+                self.q.put(("dev_login", identity, None, None))
+            except Exception as exc:
+                self.q.put(("dev_login_error", str(exc), None, None))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _build_status(self):
         box = ttk.Frame(self.root)
@@ -2392,6 +2430,38 @@ class App:
                         self.server_console.insert("end", str(line) + "\n")
                         self.server_console.see("end")
                         self._load_server_panel(name)
+
+                elif kind == "dev_login":
+                    self._dev_identity = text
+                    email = str((text or {}).get("email", "Developer"))
+                    self._dev_status_label.config(
+                        text="Authenticated • " + email,
+                        foreground=SUCCESS
+                    )
+                    self._dev_login_button.config(
+                        state="normal",
+                        text="Developer Authenticated"
+                    )
+                    self.status.config(
+                        text="Developer authentication successful",
+                        foreground=SUCCESS
+                    )
+                    self.log_message("Developer authenticated: " + email)
+
+                elif kind == "dev_login_error":
+                    self._dev_status_label.config(
+                        text="Authentication failed",
+                        foreground=DANGER
+                    )
+                    self._dev_login_button.config(
+                        state="normal",
+                        text="Developer Login"
+                    )
+                    self.status.config(
+                        text="Developer authentication failed",
+                        foreground=DANGER
+                    )
+                    self.log_message("Developer authentication failed: " + str(text))
 
                 elif kind == "msg":
                     self.log_message(text)
