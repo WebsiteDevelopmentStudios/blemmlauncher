@@ -943,9 +943,14 @@ class App:
                  font=("Segoe UI", 19, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(header, text="Create, run, configure and manage your local Minecraft servers.",
                  bg=BG, fg=MUTED, font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w")
-        self.new_server_btn = ttk.Button(header, text="+ New Server", style="Primary.TButton",
-                                          command=self._new_server_dialog)
-        self.new_server_btn.grid(row=0, column=2, rowspan=2, sticky="e")
+        actions = tk.Frame(header, bg=BG)
+        actions.grid(row=0, column=2, rowspan=2, sticky="e")
+        self.new_server_btn = ttk.Button(actions, text="+ New Server", style="Primary.TButton",
+                                         command=self._new_server_dialog)
+        self.new_server_btn.pack(side="left", padx=(0, 8))
+        self.delete_server_btn = ttk.Button(actions, text="Delete Server",
+                                            command=self._delete_server)
+        self.delete_server_btn.pack(side="left")
 
         left = ttk.Frame(tab, style="Card.TFrame", padding=10)
         left.grid(row=1, column=0, sticky="nsw", padx=(0, 10))
