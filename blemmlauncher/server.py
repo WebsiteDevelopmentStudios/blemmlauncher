@@ -448,6 +448,9 @@ def create(name, kind, version, ram="4G", java=None):
     if not version:
         raise RuntimeError("Select a version.")
     d = root(name)
+    existing = list_servers()
+    if name not in existing and len(existing) >= MAX_SERVERS:
+        raise RuntimeError("You can only have " + str(MAX_SERVERS) + " servers. Delete an existing server before creating another.")
     if os.path.exists(d) and os.listdir(d):
         raise RuntimeError("That server already exists and contains files.")
     os.makedirs(d, exist_ok=True)
