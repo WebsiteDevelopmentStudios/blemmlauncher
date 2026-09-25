@@ -882,16 +882,17 @@ class App:
     def _schedule_remote_console_refresh(self):
         if not self.root.winfo_exists():
             return
-        if self._remote_selected_server() and (
-            self._dev_identity and str(self._dev_identity.get("role", "")).lower() == "owner"
-        ):
-            self.root.after(2000, self._poll_owner_console)
+        if self._remote_selected_server():
+            self.root.after(2000, self._poll_remote_console)
 
-    def _poll_owner_console(self):
+    def _poll_remote_console(self):
         if not self.root.winfo_exists():
             return
         name = self._remote_selected_server()
-        if name and server.running(name):
+        if name and (
+            (self._dev_identity and str(self._dev_identity.get("role", "")).lower() == "owner" and server.running(name))
+            or self._remote_agent_id
+        ):
             self._remote_action("logs")
 
     def _remote_send_console(self):
