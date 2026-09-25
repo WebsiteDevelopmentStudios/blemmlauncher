@@ -142,24 +142,25 @@ def _minecraft_versions(limit=80):
 
 
 def _paper_versions(limit=80):
-    # Paper's public API is the authoritative source for Paper versions.
-    # Keep the request path explicit so redirects/removed endpoints don't
-    # silently turn into an empty selector.
-    urls = [
-        "https://api.papermc.io/v2/projects/paper",
-        "https://papermc.io/api/v2/projects/paper",
-    ]
-    last = None
-    for url in urls:
-        try:
-            data = _request(url)
-            versions = data.get("versions") if isinstance(data, dict) else None
-            if isinstance(versions, list) and versions:
-                return list(reversed([str(v) for v in versions]))[:limit]
-            last = "Paper returned no Minecraft versions."
-        except Exception as ex:
-            last = str(ex)
-    raise RuntimeError(last or "Could not reach the Paper version API.")
+    # Paper's v2 API was retired. Use the current official Paper downloads
+    # service (Fill API v3).
+    data = _request("https://fill.papermc.io/v3/projects/paper/versions")
+    versions = data.get("versions") if isinstance(data, dict) else data
+    if not isinstance(versions, list):
+        raise RuntimeError("Paper returned an invalid version list.")
+
+    out = []
+    for item in versions:
+        if isinstance(item, dict):
+            # Current Fill API: {"version": {"id": "1.x.x", ...}, ...}
+            nested = item.get("version")
+            value = nested.get("id") if isinstance(nested, dict) else item.get("id")
+        else:
+            value = item
+        if value:
+            out.append(str(value))
+
+    return list(dict.fromkeys(out))[:limit]
 
 
 
@@ -352,18 +353,20 @@ def create(name, kind, version, ram="4G", java=None):
         _request(url, dest=os.path.join(d, "server.jar"))
 
     elif kind == "paper":
-        data = _request("https://api.papermc.io/v2/projects/paper/versions/" + urllib.parse.quote(version, safe=""))
-        builds = data.get("builds", [])
-        if not builds:
-            raise RuntimeError("No Paper build found for " + version)
-        build = builds[-1]
+        # Ask Fill for the latest stable build and use the download URL it
+        # provides. This avoids depending on Paper's retired v2 API and also
+        # avoids guessing JAR filenames.
         url = (
-            "https://api.papermc.io/v2/projects/paper/versions/"
+            "https://fill.papermc.io/v3/projects/paper/versions/"
             + urllib.parse.quote(version, safe="")
-            + "/builds/" + str(build) + "/downloads/paper-"
-            + urllib.parse.quote(version, safe="") + "-" + str(build) + ".jar"
+            + "/builds/latest"
         )
-        _request(url, dest=os.path.join(d, "server.jar"))
+        data = _request(url)
+        download = data.get("downloads", {}).get("server:default", {}) if isinstance(data, dict) else {}
+        download_url = download.get("url")
+        if not download_url:
+            raise RuntimeError("No stable Paper build is available for " + version)
+        _request(download_url, dest=os.path.join(d, "server.jar"))
 
     elif kind == "fabric":
         _fabric_server(d, version, java)
