@@ -276,7 +276,26 @@ def java_bin_for(version_id, major=None):
     if shutil.which(exe) and major_int is not None:
         sysmaj = _system_java_major()
 
-        if sysmaj is None or sysmaj >= major_int:
+        # A 32-bit JVM can report the correct Java major but cannot reserve
+        # the multi-gigabyte heaps Minecraft servers commonly need. Only use
+        # the system JVM when it is explicitly a 64-bit VM.
+        try:
+            r = subprocess.run(
+                [exe, "-version"],
+                capture_output=True,
+                timeout=30
+            )
+            txt = ((r.stderr or b"") + (r.stdout or b"")).decode(errors="replace")
+            is_64 = (
+                "64-Bit" in txt
+                or "amd64" in txt.lower()
+                or "x86_64" in txt.lower()
+                or "aarch64" in txt.lower()
+            )
+        except Exception:
+            is_64 = False
+
+        if sysmaj is not None and sysmaj >= major_int and is_64:
             return exe
 
     jdir = os.path.join(TOOLS, "java-" + str(major))
