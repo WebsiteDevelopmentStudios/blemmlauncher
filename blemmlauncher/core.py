@@ -72,20 +72,32 @@ TOOLS = os.path.join(GAME_DIR, "tools")
 # ============================================================
 
 _reporter = None
-
+_reporters = []
 
 def set_reporter(fn):
-    global _reporter
+    global _reporter, _reporters
     _reporter = fn
+    _reporters = [fn] if fn else []
 
+def add_reporter(fn):
+    if fn and fn not in _reporters:
+        _reporters.append(fn)
+
+def remove_reporter(fn):
+    try:
+        _reporters.remove(fn)
+    except ValueError:
+        pass
 
 def _emit(kind, text, done=None, total=None):
-    if _reporter:
+    targets = list(_reporters)
+    if _reporter and _reporter not in targets:
+        targets.append(_reporter)
+    for reporter in targets:
         try:
-            _reporter(kind, text, done, total)
+            reporter(kind, text, done, total)
         except Exception:
             pass
-
 
 def report(stage, done=None, total=None):
     _emit("stage", stage, done, total)
