@@ -66,7 +66,7 @@ class OwnerServerManager:
         tk.Label(bar, text="Minecraft server", bg=CARD, fg=MUTED).pack(side="left")
         self.server_box = ttk.Combobox(bar, textvariable=self.server_var, state="readonly", width=28)
         self.server_box.pack(side="left", padx=8)
-        self.agent_box.bind("<<ComboboxSelected>>", lambda e: self.refresh_servers())
+        self.agent_box.bind("<<ComboboxSelected>>", lambda e: self._agent_changed())
         self.server_box.bind("<<ComboboxSelected>>", lambda e: self.refresh_files())
 
         controls = tk.Frame(self.win, bg=BG)
@@ -114,8 +114,18 @@ class OwnerServerManager:
 
     def call(self, action, payload, callback):
         token = self.app._remote_token()
-        if not token or not self.agent:
+        if not token:
+            callback(None, "Developer authentication has expired. Please log in again.")
+            return
+        if not self.agent:
             callback(None, "Select an online server PC.")
+            return
+        selected_agent = next(
+            (a for a in self.agents if str(a.get("id", "")) == str(self.agent)),
+            None,
+        )
+        if selected_agent and str(selected_agent.get("status", "")).lower() != "online":
+            callback(None, "The selected server PC is offline. Start the BlemmLauncher agent on that PC.")
             return
 
         def worker():
@@ -140,27 +150,60 @@ class OwnerServerManager:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _agent_changed(self):
+        index = self.agent_box.current()
+        if 0 <= index < len(self.agents):
+            self.agent = self.agents[index].get("id", "")
+        self.server_var.set("")
+        self.server_box["values"] = ()
+        self.files.delete(0, "end")
+        self.path = ""
+        self.path_var.set("/")
+        self.refresh_servers()
+
     def refresh_agents(self):
+        token = self.app._remote_token()
+        if not token:
+            self.status.set("Developer authentication has expired.")
+            messagebox.showerror(
+                "Server Management",
+                "Your developer session has expired. Log in again before managing servers.",
+                parent=self.win,
+            )
+            return
         self.status.set("Loading server PCs…")
         def worker():
             try:
-                rows = dev_auth.list_agents(self.app._remote_token())
+                rows = dev_auth.list_agents(token)
                 self.win.after(0, lambda: self.apply_agents(rows))
             except Exception as exc:
-                self.win.after(0, lambda: self.status.set(str(exc)))
+                self.win.after(0, lambda err=str(exc): self._show_error(err))
         threading.Thread(target=worker, daemon=True).start()
+
+    def _show_error(self, message):
+        self.status.set(str(message))
+        messagebox.showerror("Server Management", str(message), parent=self.win)
 
     def apply_agents(self, rows):
         self.agents = rows or []
-        values = [str(a.get("id")) + " • " + str(a.get("name","Unnamed")) +
-                  " • " + str(a.get("status","offline")) for a in self.agents]
+        values = [
+            str(a.get("name", "Unnamed")) + " • " +
+            str(a.get("status", "offline")).upper()
+            for a in self.agents
+        ]
         self.agent_box["values"] = values
         if values:
             self.agent_box.current(0)
-            self.agent = self.agents[0].get("id","")
+            self.agent = self.agents[0].get("id", "")
             self.refresh_servers()
+            if str(self.agents[0].get("status", "")).lower() != "online":
+                self.status.set("Server PC is offline — start the BlemmLauncher agent.")
         else:
-            self.status.set("No paired server PCs.")
+            self.agent = ""
+            self.server_box["values"] = ()
+            self.server_var.set("")
+            self.files.delete(0, "end")
+            self.status.set("No paired server PCs. Pair a server PC first.")
 
     def refresh_servers(self):
         if self.agent_box.current() >= 0 and self.agents:
@@ -187,14 +230,29 @@ class OwnerServerManager:
             self.status.set("No servers on this PC.")
 
     def server_action(self, action):
-        if not self.server_var.get():
+        name = self.server_var.get().strip()
+        if not name:
+            self._show_error("Select a Minecraft server first.")
             return
-        self.status.set(action.title()+"…")
-        self.call(action, {"server":self.server_var.get()},
-                  lambda r,e: self.status.set(e or action.title()+" completed."))
+        self.status.set(action.title() + "…")
+        def done(result, error):
+            if error:
+                self._show_error(error)
+                return
+            self.status.set(action.title() + " completed.")
+            if action in ("start", "stop", "restart"):
+                self.refresh_servers()
+            elif action == "logs":
+                lines = (result or {}).get("lines", [])
+                self.editor.delete("1.0", "end")
+                self.editor.insert("1.0", "\n".join(str(x.get("line", "")) for x in lines))
+                self.file_var.set("")
+                self.status.set("Console output loaded.")
+        self.call(action, {"server": name}, done)
 
     def create_server(self):
         if not self.agent:
+            self._show_error("Select an online server PC first.")
             return
         name = simpledialog.askstring("Create Server","Server name:",parent=self.win)
         if not name: return
@@ -212,7 +270,9 @@ class OwnerServerManager:
                   lambda r,e: (self.status.set(e or "Server created."), self.refresh_servers()))
 
     def refresh_files(self):
-        if not self.server_var.get(): return
+        if not self.server_var.get():
+            self.status.set("Select a Minecraft server first.")
+            return
         self.status.set("Loading files…")
         self.call("files", {"server":self.server_var.get(),"path":self.path},
                   self.apply_files)
@@ -250,7 +310,9 @@ class OwnerServerManager:
 
     def load_file(self):
         p = self.file_var.get().strip()
-        if not p: return
+        if not p:
+            self._show_error("Enter a file path first.")
+            return
         self.status.set("Loading file…")
         self.call("read_file",{"server":self.server_var.get(),"path":p},
                   lambda r,e: (self.editor.delete("1.0","end"),
@@ -259,7 +321,12 @@ class OwnerServerManager:
 
     def save_file(self):
         p = self.file_var.get().strip()
-        if not p: return
+        if not p:
+            self._show_error("Enter a file path first.")
+            return
+        if not self.server_var.get().strip():
+            self._show_error("Select a Minecraft server first.")
+            return
         content = self.editor.get("1.0","end-1c")
         if len(content.encode()) > 5*1024*1024:
             messagebox.showerror("Server Files","Files over 5 MB cannot be edited.",parent=self.win)
@@ -297,7 +364,9 @@ class OwnerServerManager:
 
     def delete_server(self):
         name=self.server_var.get()
-        if not name:return
+        if not name:
+            self._show_error("Select a Minecraft server first.")
+            return
         if not messagebox.askyesno("Delete Server",
             "Permanently delete '"+name+"' and all of its files?",parent=self.win):return
         self.call("delete_server",{"server":name},
