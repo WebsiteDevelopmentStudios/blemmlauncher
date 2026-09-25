@@ -906,7 +906,7 @@ class App:
         right = tk.Frame(tab, bg=BG)
         right.grid(row=1, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(2, weight=1)
+        right.rowconfigure(1, weight=1)
 
         info = ttk.Frame(right, style="Card.TFrame", padding=12)
         info.grid(row=0, column=0, sticky="ew", pady=(0, 8))
@@ -928,7 +928,7 @@ class App:
         ttk.Button(controls, text="Refresh Files", command=self._refresh_server_files).pack(side="left", padx=3)
 
         notebook = ttk.Notebook(right)
-        notebook.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        notebook.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
         self.server_console_tab = ttk.Frame(notebook, style="Card.TFrame")
         self.server_files_tab = ttk.Frame(notebook, style="Card.TFrame")
         notebook.add(self.server_console_tab, text="  Console  ")
