@@ -5,6 +5,9 @@ import json
 import shutil
 import queue
 import threading
+import subprocess
+import sys
+import time
 import tkinter as tk
 import webbrowser
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
@@ -151,6 +154,10 @@ class App:
         self._dev_identity = None
         self._dev_username = tk.StringVar()
         self._dev_password = tk.StringVar()
+        self._remote_agent_id = None
+        self._remote_agents = []
+        self._remote_server = tk.StringVar()
+        self._remote_file = tk.StringVar()
 
         self._build_header()
         self._build_tabs()
