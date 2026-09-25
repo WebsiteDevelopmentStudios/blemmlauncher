@@ -69,8 +69,23 @@ def running(name):
 def start(name, callback=None):
     if running(name): return
     cfg = load(name)
-    jar, ram, java, launch = cfg.get("jar", "server.jar"), str(cfg.get("ram", "4G")), cfg.get("java", "java"), cfg.get("launch")
-    if not os.path.isfile(path(name, jar)): raise RuntimeError("Server JAR not found: " + jar)
+    jar, ram, configured_java, launch = (
+        cfg.get("jar", "server.jar"),
+        str(cfg.get("ram", "4G")),
+        cfg.get("java"),
+        cfg.get("launch")
+    )
+    if not os.path.isfile(path(name, jar)):
+        raise RuntimeError("Server JAR not found: " + jar)
+
+    # "java" in older server configs means "use whatever Java is on PATH".
+    # Resolve that through the managed Java system so an old/32-bit JVM cannot
+    # be selected for a multi-GB server heap.
+    if configured_java in (None, "", "java", "java.exe"):
+        java = core.java_bin_for(str(cfg.get("version", "")))
+    else:
+        java = configured_java
+
     cmd = ([java, "-Xms" + ram, "-Xmx" + ram, "-jar", jar, "nogui"] if not launch else (["cmd", "/c", launch] if os.name == "nt" else ["sh", launch]))
     env = os.environ.copy()
     # Forge/NeoForge run scripts normally call "java" themselves. Put the
