@@ -203,11 +203,14 @@ async function ensureAgentTables(env) {
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS agent_pairings (code TEXT PRIMARY KEY, created_by TEXT NOT NULL, expires_at INTEGER NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'offline', last_seen INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, owner_username TEXT)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS agent_commands (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, action TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending', result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    env.DB.prepare("ALTER TABLE agents ADD COLUMN owner_username TEXT").bind()
-  ]).catch(async () => {
-    // Existing installations may already have the column; ignore that migration error.
-  });
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agent_commands (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, action TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending', result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+  ]);
+
+  const table = await env.DB.prepare("PRAGMA table_info(agents)").all();
+  const columns = new Set((table.results || []).map(row => row.name));
+  if (!columns.has("owner_username")) {
+    await env.DB.prepare("ALTER TABLE agents ADD COLUMN owner_username TEXT").run();
+  }
 }
 
 async function requireDeveloper(request, env) {
