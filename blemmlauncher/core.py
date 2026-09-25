@@ -296,23 +296,63 @@ def java_bin_for(version_id, major=None):
         download(ADOPTIUM_API.format(major=major), zpath)
 
         with tempfile.TemporaryDirectory() as td:
-            with zipfile.ZipFile(zpath) as z:
-                z.extractall(td)
+            try:
+                with zipfile.ZipFile(zpath) as z:
+                    z.extractall(td)
+            except zipfile.BadZipFile as e:
+                raise RuntimeError(
+                    "Java download was not a valid ZIP archive. "
+                    "The runtime was not installed."
+                ) from e
 
-            inner = os.listdir(td)[0]
+            # Adoptium archives contain one top-level JDK directory, but
+            # don't assume its exact name or ordering.
+            candidates = []
+            for r, dirs, files in os.walk(td):
+                if os.path.isfile(os.path.join(r, "bin", exe)):
+                    candidates.append(r)
 
-            os.replace(os.path.join(td, inner), jdir)
+            if not candidates:
+                raise RuntimeError(
+                    "Java " + str(major) + " downloaded, but no executable "
+                    + exe + " was found in the archive."
+                )
 
-        os.remove(zpath)
+            if os.path.exists(jdir):
+                shutil.rmtree(jdir, ignore_errors=True)
+            os.replace(candidates[0], jdir)
+
+        try:
+            os.remove(zpath)
+        except OSError:
+            pass
 
         if os_name() != "windows":
             import stat
-
             for r, _, fs in os.walk(jdir):
                 for f in fs:
                     p = os.path.join(r, f)
                     st = os.stat(p)
                     os.chmod(p, st.st_mode | stat.S_IEXEC)
+
+    if not os.path.exists(jbin):
+        raise RuntimeError("Managed Java " + str(major) + " installation is incomplete.")
+
+    # Verify the runtime before returning it. This catches silent/corrupt
+    # downloads instead of letting a later installer fail with a vague error.
+    try:
+        check = subprocess.run(
+            [jbin, "-version"],
+            capture_output=True,
+            timeout=30
+        )
+        if check.returncode != 0:
+            raise RuntimeError(
+                "Managed Java " + str(major) + " was installed but could not start:\n"
+                + ((check.stderr or b"") + (check.stdout or b"")).decode(errors="replace")[-1200:]
+            )
+    except FileNotFoundError as e:
+        raise RuntimeError("Managed Java executable was not found after installation.") from e
 
     return jbin
 
