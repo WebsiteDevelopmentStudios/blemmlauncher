@@ -522,7 +522,7 @@ def modrinth_search(query, mc_version, loader=None, project_type="mod"):
             "author": h.get("author", "Unknown"),
             "icon": h.get("icon_url"),
         }
-        for h in data.get("hits", [])
+        for h in hits
     ]
 
 
