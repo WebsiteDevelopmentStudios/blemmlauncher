@@ -215,6 +215,10 @@ def list_agent_commands(token: str, agent_id: str) -> list[dict]:
     ).get("commands", [])
 
 
+def create_agent_pairing(token: str) -> dict:
+    return _request("/agents/pair", "POST", token=token)
+
+
 if __name__ == "__main__":
     import getpass
 
