@@ -185,7 +185,7 @@ class Agent:
             kind = str(payload.get("type", "vanilla")).strip().lower()
             version = str(payload.get("version", "")).strip()
             ram = str(payload.get("ram", "4G")).strip() or "4G"
-            return server.create(name, kind, version, ram=ram)
+            return server.create(name, kind, version, ram=ram, allow_reserved=True)
 
         if action == "files":
             if not name:
