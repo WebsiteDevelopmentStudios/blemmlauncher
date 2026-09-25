@@ -25,7 +25,8 @@ WORKER_URL = os.environ.get(
     "https://blemmlauncher-dev-auth.wowgrayhaha.workers.dev",
 ).strip().rstrip("/")
 
-STATE_PATH = os.path.join(os.path.dirname(__file__), ".agent.json")
+STATE_DIR = os.environ.get("BLEMM_AGENT_STATE_DIR", os.path.dirname(__file__))
+STATE_PATH = os.path.join(STATE_DIR, ".agent.json")
 LOG_LIMIT = 500
 
 
