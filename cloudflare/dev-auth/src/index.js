@@ -211,14 +211,15 @@ f.addEventListener("submit", async e => {
 
       const passwordHash = await hashPassword(password);
       await env.DB.prepare(
-        "INSERT INTO developers (username, password_hash) VALUES (?, ?) " +
-        "ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash"
+        "INSERT INTO developers (username, password_hash, role) VALUES (?, ?, 'developer') " +
+        "ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, role = CASE WHEN developers.role = 'owner' THEN developers.role ELSE 'developer' END"
       ).bind(username, passwordHash).run();
 
       return json({ saved: true, username });
     }
 
     if (request.method === "POST" && url.pathname === "/login") {
+      await ensureOwner(env);
       if (!env.DB) return json({ error: "D1 binding DB is not configured." }, 500);
 
       const body = await parseJson(request);
