@@ -14,6 +14,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from . import database
+
 
 LAUNCHERS_ROOT = os.environ.get(
     "BLEMM_DIR",
@@ -77,11 +79,15 @@ def instance_dir(name):
 
 def list_instances():
     if not os.path.isdir(INSTANCES_DIR):
-        return []
-    return [
+        os.makedirs(INSTANCES_DIR, exist_ok=True)
+        return database.reconcile("instances", [])
+    disk = [
         n for n in sorted(os.listdir(INSTANCES_DIR))
         if os.path.exists(os.path.join(INSTANCES_DIR, n, "blemm.json"))
     ]
+    # Reconcile with the persistent registry so instances survive restarts
+    # and older launcher versions are migrated automatically.
+    return database.reconcile("instances", disk)
 
 
 def load_cfg(name):
@@ -93,6 +99,7 @@ def save_cfg(name, cfg):
     os.makedirs(instance_dir(name), exist_ok=True)
     with open(os.path.join(instance_dir(name), "blemm.json"), "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
+    database.register("instances", name)
 
 
 def install_vanilla(mc_version):
@@ -134,6 +141,7 @@ def delete(name):
     d = instance_dir(name)
     if os.path.isdir(d):
         shutil.rmtree(d)
+    database.unregister("instances", name)
 
 
 def use(name, core):
