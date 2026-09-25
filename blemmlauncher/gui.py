@@ -86,7 +86,7 @@ def style_dark(root):
         foreground=[("selected", ACCENT), ("active", FG)],
     )
     s.configure("TButton", background=FIELD, foreground=FG, padding=(10, 7), font=("Segoe UI", 9, "bold"))
-    s.map("TButton", background=[("active", "#3b3f4a")])
+    s.map("TButton", background=[("active", GREEN_DARK), ("pressed", GREEN_MID)])
     s.configure(
         "Primary.TButton",
         background=ACCENT2,
@@ -110,7 +110,7 @@ def style_dark(root):
     s.configure(
         "Horizontal.TProgressbar",
         background=ACCENT,
-        troughcolor=FIELD,
+        troughcolor=GREEN_DARK,
         thickness=9,
     )
     root.configure(bg=BG)
@@ -337,10 +337,12 @@ class App:
         ttk.Label(card, text="Loader", style="MutedCard.TLabel").grid(
             row=3, column=0, sticky="w", pady=6
         )
-        ttk.Combobox(
+        self.loader_type_combo = ttk.Combobox(
             card, textvariable=self.loader_type,
             values=["vanilla", "fabric", "neoforge", "forge"], state="readonly"
-        ).grid(row=3, column=1, sticky="ew", padx=(12, 0), pady=6)
+        )
+        self.loader_type_combo.grid(row=3, column=1, sticky="ew", padx=(12, 0), pady=6)
+        self.loader_type_combo.bind("<<ComboboxSelected>>", self._loader_changed)
 
         self.loader_info = ttk.Label(
             card,
@@ -360,6 +362,17 @@ class App:
         ).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         card.rowconfigure(6, weight=1)
         self._refresh_loader_instances()
+
+    def _loader_changed(self, _event=None):
+        if self.loader_type.get().lower() == "vanilla":
+            self.loader_info.config(
+                text="Vanilla installs the selected Minecraft version with no mod loader."
+            )
+        else:
+            self.loader_info.config(
+                text="BlemmLauncher will download and install the correct "
+                + self.loader_type.get().title() + " build automatically."
+            )
 
     def _build_modrinth_tab(self):
         tab = self.modrinth_tab
