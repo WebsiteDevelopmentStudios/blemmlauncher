@@ -1,5 +1,5 @@
 # You can check this for malware yourself:
-'https://www.virustotal.com/'
+"https://www.virustotal.com/gui/url-analysis/u-8bdb66629b45530f013d216e724ee7e8d188e617679eae28f273f3bb67a7388f-63ba47c8"
 
 ## BLEMMLAUNCHER
 =============
