@@ -943,8 +943,9 @@ class App:
                  font=("Segoe UI", 19, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(header, text="Create, run, configure and manage your local Minecraft servers.",
                  bg=BG, fg=MUTED, font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w")
-        ttk.Button(header, text="+ New Server", style="Primary.TButton",
-                   command=self._new_server_dialog).grid(row=0, column=2, rowspan=2, sticky="e")
+        self.new_server_btn = ttk.Button(header, text="+ New Server", style="Primary.TButton",
+                                          command=self._new_server_dialog)
+        self.new_server_btn.grid(row=0, column=2, rowspan=2, sticky="e")
 
         left = ttk.Frame(tab, style="Card.TFrame", padding=10)
         left.grid(row=1, column=0, sticky="nsw", padx=(0, 10))
@@ -961,7 +962,10 @@ class App:
         ttk.Button(left, text="Delete Server", command=self._delete_server).pack(fill="x", pady=(8, 0))
         self.server_locked_label = tk.Label(left, text="🔒 Create a server first",
                                             bg=CARD, fg=MUTED, font=("Segoe UI", 8))
+        self.server_count_label = tk.Label(left, text="0 / 2 servers",
+                                           bg=CARD, fg=MUTED, font=("Segoe UI", 8))
         self.server_locked_label.pack(anchor="w", padx=4, pady=(8, 2))
+        self.server_count_label.pack(anchor="w", padx=4, pady=(0, 2))
 
         right = tk.Frame(tab, bg=BG)
         right.grid(row=1, column=1, sticky="nsew")
@@ -1101,6 +1105,10 @@ class App:
         if not hasattr(self, "server_list"):
             return
         names = server.list_servers()
+        if hasattr(self, "server_count_label"):
+            self.server_count_label.config(text=str(len(names)) + " / " + str(server.MAX_SERVERS) + " servers")
+        if hasattr(self, "new_server_btn"):
+            self.new_server_btn.config(state="disabled" if len(names) >= server.MAX_SERVERS else "normal")
         self.server_list.delete(0, "end")
         for name in names:
             self.server_list.insert("end", name)
