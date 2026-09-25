@@ -145,7 +145,7 @@ def _domain_slug(name):
     return value or "server"
 
 
-def domain_info(name, suffix="blemm.eu.cc"):
+def domain_info(name, suffix="blemm.devs.surf"):
     """Build a safe free-domain candidate from the server name.
 
     The harys722/free-domains repository is a directory of free-domain
@@ -343,7 +343,16 @@ def create(name, kind, version, ram="4G", java="java"):
     jar = "server.jar" if os.path.isfile(os.path.join(d, "server.jar")) else "fabric-server-launch.jar"
     launch = "run.bat" if os.path.isfile(os.path.join(d, "run.bat")) else ("run.sh" if os.path.isfile(os.path.join(d, "run.sh")) else None)
     if kind in ("forge", "neoforge") and not launch: raise RuntimeError(kind.title() + " installer did not create a run script.")
-    cfg = {"name": name, "type": kind.title(), "version": version, "ram": ram, "java": java, "jar": jar, "launch": launch}
+    cfg = {
+        "name": name,
+        "type": kind.title(),
+        "version": version,
+        "ram": ram,
+        "java": java,
+        "jar": jar,
+        "launch": launch,
+        "domain_suffix": "blemm.devs.surf",
+    }
     save(name, cfg)
     return cfg
 def _server_java(version):
