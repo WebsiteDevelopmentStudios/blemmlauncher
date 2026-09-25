@@ -32,11 +32,21 @@ jobs:
           python -m py_compile run.py
           Get-ChildItem blemmlauncher\*.py | ForEach-Object { python -m py_compile $_.FullName }
 
+      - name: Verify launcher imports
+        shell: pwsh
+        run: |
+          python -c "from blemmlauncher import gui; print('GUI import OK:', gui.__file__)"
+
       - name: Build Windows EXE
         shell: pwsh
         run: |
           pyinstaller --clean --onefile --noconsole --uac-admin `
             --name BlemmLauncher `
+            --paths . `
+            --hidden-import blemmlauncher.gui `
+            --hidden-import blemmlauncher.core `
+            --hidden-import blemmlauncher.instances `
+            --hidden-import blemmlauncher.server `
             --collect-submodules blemmlauncher `
             --collect-submodules Dev `
             --collect-data certifi `
