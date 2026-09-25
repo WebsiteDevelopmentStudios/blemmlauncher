@@ -9,16 +9,19 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from . import core, instances
 
 
-BG = "#15161b"
-PANEL = "#202229"
-CARD = "#262932"
-FIELD = "#30333d"
-FG = "#f1f3f7"
-MUTED = "#9298a8"
-ACCENT = "#e04bff"
-ACCENT2 = "#7c5cff"
-SUCCESS = "#4ade80"
-DANGER = "#ff5c70"
+BG = "#07110b"
+PANEL = "#0b1911"
+CARD = "#102218"
+FIELD = "#142b1d"
+FG = "#edfff2"
+MUTED = "#82a995"
+ACCENT = "#38ed7c"
+ACCENT2 = "#19b95b"
+SUCCESS = "#55f58b"
+DANGER = "#ff687a"
+GREEN_DARK = "#0a3a20"
+GREEN_MID = "#18b85b"
+GREEN_SOFT = "#2de574"
 
 
 def style_dark(root):
@@ -36,7 +39,7 @@ def style_dark(root):
         bordercolor=CARD,
         lightcolor=CARD,
         darkcolor=CARD,
-        troughcolor=FIELD,
+        troughcolor=GREEN_DARK,
         arrowcolor=MUTED,
     )
     s.configure("TFrame", background=BG)
@@ -79,19 +82,19 @@ def style_dark(root):
     )
     s.map(
         "TNotebook.Tab",
-        background=[("selected", CARD), ("active", PANEL)],
-        foreground=[("selected", FG), ("active", FG)],
+        background=[("selected", GREEN_DARK), ("active", "#12351f")],
+        foreground=[("selected", ACCENT), ("active", FG)],
     )
-    s.configure("TButton", background=FIELD, foreground=FG, padding=(10, 7))
+    s.configure("TButton", background=FIELD, foreground=FG, padding=(10, 7), font=("Segoe UI", 9, "bold"))
     s.map("TButton", background=[("active", "#3b3f4a")])
     s.configure(
         "Primary.TButton",
         background=ACCENT2,
-        foreground="#ffffff",
+        foreground="#04130a",
         font=("Segoe UI", 10, "bold"),
         padding=(14, 9),
     )
-    s.map("Primary.TButton", background=[("active", ACCENT)])
+    s.map("Primary.TButton", background=[("active", GREEN_SOFT)])
     s.configure(
         "Play.TButton",
         background=SUCCESS,
@@ -141,6 +144,7 @@ class App:
         root.after(100, self._drain)
 
         self._refresh_list()
+        self._animate_status()
         threading.Thread(target=self._load_versions, daemon=True).start()
 
     def _build_header(self):
@@ -206,7 +210,7 @@ class App:
         actions = ttk.Frame(left, style="Card.TFrame")
         actions.pack(fill="x", pady=(10, 0))
         for i, (label, cmd) in enumerate([
-            ("＋ New", self.new_inst), ("Import", self.import_inst),
+            ("Import", self.import_inst),
             ("Client…", self.import_client_dialog), ("Export", self.export_inst),
             ("Shortcut", self.make_shortcut), ("Delete", self.del_inst),
         ]):
@@ -287,7 +291,7 @@ class App:
         ttk.Label(
             hero,
             text=(
-                "Install Fabric, NeoForge, or Forge automatically. "
+                "Install Vanilla, Fabric, NeoForge, or Forge automatically. "
                 "BlemmLauncher downloads the correct installer and required Java."
             ),
             style="MutedCard.TLabel"
@@ -335,7 +339,7 @@ class App:
         )
         ttk.Combobox(
             card, textvariable=self.loader_type,
-            values=["fabric", "neoforge", "forge"], state="readonly"
+            values=["vanilla", "fabric", "neoforge", "forge"], state="readonly"
         ).grid(row=3, column=1, sticky="ew", padx=(12, 0), pady=6)
 
         self.loader_info = ttk.Label(
@@ -351,7 +355,7 @@ class App:
         )
 
         ttk.Button(
-            card, text="Install Loader", style="Primary.TButton",
+            card, text="Install / Create", style="Primary.TButton",
             command=self.install_loader
         ).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         card.rowconfigure(6, weight=1)
@@ -375,7 +379,7 @@ class App:
         )
         ttk.Label(
             top,
-            text="A clean store-style browser for compatible Minecraft projects.",
+            text="Browse compatible projects like a real in-launcher marketplace.",
             style="MutedCard.TLabel"
         ).grid(row=1, column=0, sticky="w", pady=(2, 9))
 
@@ -387,7 +391,7 @@ class App:
         )
         ttk.Combobox(
             searchbar, textvariable=self.modrinth_type,
-            values=["mod", "shader", "resourcepack"], state="readonly", width=15
+            values=["mod", "modpack", "shader", "resourcepack", "datapack", "world"], state="readonly", width=18
         ).grid(row=0, column=1, padx=7)
         ttk.Button(
             searchbar, text="Search", style="Primary.TButton",
@@ -429,33 +433,43 @@ class App:
         self.modrinth_message.pack(anchor="w", padx=18, pady=18)
 
     def _store_card(self, hit, target_name, mc_version, loader, ptype):
-        card = ttk.Frame(self.modrinth_cards, style="Card.TFrame", padding=14)
-        card.pack(fill="x", padx=10, pady=6)
-        card.columnconfigure(0, weight=1)
+        card = tk.Frame(
+            self.modrinth_cards, bg=CARD, highlightthickness=1,
+            highlightbackground=GREEN_DARK, bd=0
+        )
+        card.pack(fill="x", padx=12, pady=7, ipady=3)
+        card.columnconfigure(1, weight=1)
 
         title = hit.get("title", "Unknown")
         author = hit.get("author", "Unknown")
         downloads = hit.get("downs", 0)
         desc = hit.get("desc", "") or "No description available."
 
-        ttk.Label(card, text=title, style="Big.TLabel").grid(
-            row=0, column=0, sticky="w"
+        badge = tk.Label(
+            card, text=ptype.upper(), bg=GREEN_DARK, fg=ACCENT,
+            font=("Segoe UI", 8, "bold"), width=10, pady=12
         )
+        badge.grid(row=0, column=0, rowspan=3, padx=(12, 14), pady=8)
+
+        tk.Label(
+            card, text=title, bg=CARD, fg=FG,
+            font=("Segoe UI", 13, "bold"), anchor="w"
+        ).grid(row=0, column=1, sticky="ew", pady=(9, 1))
         ttk.Label(
             card,
-            text="by " + author + "  •  " + f"{downloads:,}" + " downloads",
+            text="by " + author + "  •  " + f"{downloads:,}" + " downloads  •  " + ptype,
             style="MutedCard.TLabel"
-        ).grid(row=1, column=0, sticky="w", pady=(1, 5))
+        ).grid(row=1, column=1, sticky="w", pady=(1, 5))
         ttk.Label(
             card, text=desc, style="MutedCard.TLabel",
-            wraplength=620, justify="left"
-        ).grid(row=2, column=0, sticky="w")
+            wraplength=600, justify="left"
+        ).grid(row=2, column=1, sticky="w")
         ttk.Button(
-            card, text="Install", style="Primary.TButton",
+            card, text="INSTALL", style="Primary.TButton",
             command=lambda h=hit: self._install_modrinth(
                 h, target_name, mc_version, loader, ptype
             )
-        ).grid(row=0, column=1, rowspan=3, padx=(16, 0))
+        ).grid(row=0, column=2, rowspan=3, padx=(12, 14))
 
     def modrinth_search(self):
         target = self.modrinth_target.get().strip()
@@ -678,6 +692,16 @@ class App:
 
             instances.use(name, core)
             self.play_btn.config(state="disabled")
+
+            if loader == "vanilla":
+                cfg = instances.load_cfg(name)
+                cfg["loader"] = None
+                cfg["loader_build"] = None
+                cfg["version"] = mc_version
+                instances.save_cfg(name, cfg)
+                self.q.put(("loader_installed", (name, "vanilla", mc_version), None, None))
+                return
+
             self.status.config(
                 text="Installing " + loader.title()
                 + " for Minecraft " + str(mc_version) + "…"
@@ -1013,6 +1037,16 @@ class App:
         self.log.insert("end", str(message) + "\n")
         self.log.see("end")
         self.log.config(state="disabled")
+
+    def _animate_status(self, phase=0):
+        if not self.root.winfo_exists():
+            return
+        colors = [ACCENT, GREEN_SOFT, SUCCESS, ACCENT]
+        try:
+            self.status.configure(foreground=colors[phase % len(colors)])
+            self.root.after(180, lambda: self._animate_status(phase + 1))
+        except Exception:
+            return
 
     def _drain(self):
         dialogs = []
