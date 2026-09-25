@@ -4,9 +4,9 @@ import os
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 
-from . import core, instances
+from . import core, instances, server
 
 
 BG = "#07110b"
@@ -131,6 +131,10 @@ class App:
         self._all_versions = []
         self._modrinth_hits = []
         self._modrinth_searching = False
+        self._server_name = None
+        self._server_path = ""
+        self._server_edit_path = None
+        self._server_editor_dirty = False
 
         self._uname = tk.StringVar(value="Blemm")
         self._ram = tk.StringVar(value="4G")
@@ -870,18 +874,431 @@ class App:
 
     def _build_server_tab(self):
         tab = self.server_tab
-        frame = ttk.Frame(tab, style="Card.TFrame", padding=30)
-        frame.pack(fill="both", expand=True, padx=40, pady=40)
-        ttk.Label(frame, text="Server", style="Big.TLabel").pack(pady=(80, 8))
-        ttk.Label(
-            frame, text="Coming soon…", style="Accent.TLabel",
-            font=("Segoe UI", 16, "bold")
-        ).pack()
-        ttk.Label(
-            frame,
-            text="Server management will be added to a future BlemmLauncher update.",
-            style="MutedCard.TLabel"
-        ).pack(pady=8)
+        tab.columnconfigure(0, weight=0)
+        tab.columnconfigure(1, weight=1)
+        tab.rowconfigure(1, weight=1)
+
+        header = tk.Frame(tab, bg=BG)
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(2, 10))
+        header.columnconfigure(1, weight=1)
+        tk.Label(header, text="Server Panel", bg=BG, fg=FG,
+                 font=("Segoe UI", 19, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(header, text="Create, run, configure and manage your local Minecraft servers.",
+                 bg=BG, fg=MUTED, font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w")
+        ttk.Button(header, text="+ New Server", style="Primary.TButton",
+                   command=self._new_server_dialog).grid(row=0, column=2, rowspan=2, sticky="e")
+
+        left = ttk.Frame(tab, style="Card.TFrame", padding=10)
+        left.grid(row=1, column=0, sticky="nsw", padx=(0, 10))
+        tk.Label(left, text="YOUR SERVERS", bg=CARD, fg=ACCENT,
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=4, pady=(2, 8))
+        self.server_list = tk.Listbox(
+            left, width=25, height=26, bg=FIELD, fg=FG,
+            selectbackground=GREEN_DARK, selectforeground=ACCENT,
+            relief="flat", borderwidth=0, highlightthickness=0,
+            font=("Segoe UI", 10)
+        )
+        self.server_list.pack(fill="y", expand=True)
+        self.server_list.bind("<<ListboxSelect>>", self._server_selected)
+        ttk.Button(left, text="Delete Server", command=self._delete_server).pack(fill="x", pady=(8, 0))
+
+        right = tk.Frame(tab, bg=BG)
+        right.grid(row=1, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+        right.rowconfigure(2, weight=1)
+
+        info = ttk.Frame(right, style="Card.TFrame", padding=12)
+        info.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        info.columnconfigure(1, weight=1)
+        self.server_title = tk.Label(info, text="No server selected", bg=CARD, fg=FG,
+                                     font=("Segoe UI", 15, "bold"))
+        self.server_title.grid(row=0, column=0, sticky="w")
+        self.server_meta = tk.Label(info, text="Create a server to get started.",
+                                    bg=CARD, fg=MUTED, font=("Segoe UI", 9))
+        self.server_meta.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        controls = tk.Frame(info, bg=CARD)
+        controls.grid(row=0, column=2, rowspan=2, sticky="e")
+        self.server_start_btn = ttk.Button(controls, text="▶ Start", style="Primary.TButton",
+                                           command=self._start_server, state="disabled")
+        self.server_start_btn.pack(side="left", padx=3)
+        self.server_stop_btn = ttk.Button(controls, text="■ Stop",
+                                          command=self._stop_server, state="disabled")
+        self.server_stop_btn.pack(side="left", padx=3)
+        ttk.Button(controls, text="Refresh Files", command=self._refresh_server_files).pack(side="left", padx=3)
+
+        notebook = ttk.Notebook(right)
+        notebook.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        self.server_console_tab = ttk.Frame(notebook, style="Card.TFrame")
+        self.server_files_tab = ttk.Frame(notebook, style="Card.TFrame")
+        notebook.add(self.server_console_tab, text="  Console  ")
+        notebook.add(self.server_files_tab, text="  File Manager  ")
+
+        console_wrap = tk.Frame(self.server_console_tab, bg=CARD)
+        console_wrap.pack(fill="both", expand=True, padx=8, pady=8)
+        self.server_console = scrolledtext.ScrolledText(
+            console_wrap, height=9, bg="#06100a", fg=FG,
+            insertbackground=FG, relief="flat", borderwidth=0,
+            font=("Consolas", 9)
+        )
+        self.server_console.pack(fill="both", expand=True)
+        command_bar = tk.Frame(console_wrap, bg=CARD)
+        command_bar.pack(fill="x", pady=(7, 0))
+        self.server_command = ttk.Entry(command_bar)
+        self.server_command.pack(side="left", fill="x", expand=True)
+        self.server_command.bind("<Return>", lambda _e: self._send_server_command())
+        ttk.Button(command_bar, text="Send", command=self._send_server_command).pack(side="left", padx=(7, 0))
+
+        files = self.server_files_tab
+        files.columnconfigure(0, weight=0)
+        files.columnconfigure(1, weight=1)
+        files.rowconfigure(1, weight=1)
+        filebar = tk.Frame(files, bg=CARD)
+        filebar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 5))
+        self.server_path_label = tk.Label(filebar, text="/", bg=CARD, fg=ACCENT,
+                                          font=("Segoe UI", 9, "bold"))
+        self.server_path_label.pack(side="left")
+        for label, command in [
+            ("Up", self._server_up),
+            ("New File", self._server_new_file),
+            ("New Folder", self._server_new_folder),
+            ("Rename", self._server_rename),
+            ("Delete", self._server_remove),
+            ("Upload", self._server_upload),
+        ]:
+            ttk.Button(filebar, text=label, command=command).pack(side="right", padx=2)
+
+        tree_frame = tk.Frame(files, bg=CARD)
+        tree_frame.grid(row=1, column=0, sticky="nsw", padx=(8, 5), pady=(0, 8))
+        self.server_tree = ttk.Treeview(tree_frame, columns=("type", "size"), show="tree headings", height=17)
+        self.server_tree.heading("#0", text="Name")
+        self.server_tree.heading("type", text="Type")
+        self.server_tree.heading("size", text="Size")
+        self.server_tree.column("#0", width=210)
+        self.server_tree.column("type", width=70)
+        self.server_tree.column("size", width=80)
+        self.server_tree.pack(side="left", fill="y")
+        sb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.server_tree.yview)
+        sb.pack(side="right", fill="y")
+        self.server_tree.configure(yscrollcommand=sb.set)
+        self.server_tree.bind("<Double-1>", self._server_open_item)
+
+        editor_frame = tk.Frame(files, bg=CARD)
+        editor_frame.grid(row=1, column=1, sticky="nsew", padx=(5, 8), pady=(0, 8))
+        editor_frame.columnconfigure(0, weight=1)
+        editor_frame.rowconfigure(1, weight=1)
+        self.server_edit_label = tk.Label(editor_frame, text="Select a text file to edit",
+                                           bg=CARD, fg=MUTED, anchor="w",
+                                           font=("Segoe UI", 9, "bold"))
+        self.server_edit_label.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        self.server_editor = scrolledtext.ScrolledText(
+            editor_frame, bg=FIELD, fg=FG, insertbackground=ACCENT,
+            relief="flat", borderwidth=0, undo=True, wrap="none",
+            font=("Consolas", 9)
+        )
+        self.server_editor.grid(row=1, column=0, sticky="nsew")
+        self.server_editor.bind("<<Modified>>", self._server_editor_changed)
+        ttk.Button(editor_frame, text="Save File", style="Primary.TButton",
+                   command=self._save_server_file).grid(row=2, column=0, sticky="e", pady=(6, 0))
+
+        self._refresh_servers()
+
+    def _refresh_servers(self):
+        if not hasattr(self, "server_list"):
+            return
+        names = server.list_servers()
+        self.server_list.delete(0, "end")
+        for name in names:
+            self.server_list.insert("end", name)
+        if self._server_name in names:
+            i = names.index(self._server_name)
+            self.server_list.selection_set(i)
+            self.server_list.see(i)
+            self._load_server_panel(self._server_name)
+        elif names:
+            self.server_list.selection_set(0)
+            self._load_server_panel(names[0])
+        else:
+            self._server_name = None
+            self.server_title.config(text="No server selected")
+            self.server_meta.config(text="Create a server to get started.")
+            self._clear_server_files()
+
+    def _server_selected(self, _event=None):
+        sel = self.server_list.curselection()
+        if sel:
+            self._load_server_panel(self.server_list.get(sel[0]))
+
+    def _load_server_panel(self, name):
+        self._server_name = name
+        try:
+            cfg = server.load(name)
+            state = "RUNNING" if server.running(name) else "STOPPED"
+            self.server_title.config(text=name)
+            self.server_meta.config(text=f"{cfg.get('type','Server')}  •  Minecraft {cfg.get('version','?')}  •  {cfg.get('ram','4G')} RAM  •  {state}")
+            self.server_start_btn.config(state="disabled" if server.running(name) else "normal")
+            self.server_stop_btn.config(state="normal" if server.running(name) else "disabled")
+            self._refresh_server_files()
+        except Exception as e:
+            self.log_message("Server panel error: " + str(e))
+
+    def _new_server_dialog(self):
+        d = tk.Toplevel(self.root)
+        d.title("Create Server")
+        d.geometry("520x430")
+        d.configure(bg=BG)
+        d.transient(self.root)
+        d.grab_set()
+        card = ttk.Frame(d, style="Card.TFrame", padding=18)
+        card.pack(fill="both", expand=True)
+        card.columnconfigure(1, weight=1)
+
+        name = tk.StringVar(value="My Server")
+        kind = tk.StringVar(value="Paper")
+        version = tk.StringVar()
+        ram = tk.StringVar(value="4G")
+        java = tk.StringVar(value="java")
+
+        ttk.Label(card, text="Create a Server", style="Big.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 14))
+        ttk.Label(card, text="Server name", style="MutedCard.TLabel").grid(row=1, column=0, sticky="w", pady=7)
+        ttk.Entry(card, textvariable=name).grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=7)
+        ttk.Label(card, text="Server type", style="MutedCard.TLabel").grid(row=2, column=0, sticky="w", pady=7)
+        type_box = ttk.Combobox(card, textvariable=kind, values=list(server.SERVER_TYPES), state="readonly")
+        type_box.grid(row=2, column=1, sticky="ew", padx=(12, 0), pady=7)
+        ttk.Label(card, text="Minecraft version", style="MutedCard.TLabel").grid(row=3, column=0, sticky="w", pady=7)
+        version_box = ttk.Combobox(card, textvariable=version, state="readonly")
+        version_box.grid(row=3, column=1, sticky="ew", padx=(12, 0), pady=7)
+        ttk.Label(card, text="RAM", style="MutedCard.TLabel").grid(row=4, column=0, sticky="w", pady=7)
+        ttk.Combobox(card, textvariable=ram, values=["2G","4G","6G","8G","12G","16G"], state="readonly").grid(row=4, column=1, sticky="ew", padx=(12, 0), pady=7)
+        ttk.Label(card, text="Java executable", style="MutedCard.TLabel").grid(row=5, column=0, sticky="w", pady=7)
+        ttk.Entry(card, textvariable=java).grid(row=5, column=1, sticky="ew", padx=(12, 0), pady=7)
+        info = ttk.Label(card, text="Loading versions…", style="MutedCard.TLabel", wraplength=430)
+        info.grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 8))
+
+        def load_versions():
+            try:
+                vals = server.versions(kind.get())
+                self.root.after(0, lambda: (version_box.configure(values=vals), version.set(vals[0] if vals else "")))
+                self.root.after(0, lambda: info.config(text=("Select a version and create the server." if vals else "This server type needs a JAR/installer upload after creation.")))
+            except Exception as e:
+                self.root.after(0, lambda: info.config(text="Could not load versions: " + str(e)))
+
+        def type_changed(_e=None):
+            version.set("")
+            threading.Thread(target=load_versions, daemon=True).start()
+
+        type_box.bind("<<ComboboxSelected>>", type_changed)
+        threading.Thread(target=load_versions, daemon=True).start()
+
+        def create_now():
+            if not name.get().strip() or not version.get():
+                messagebox.showinfo("Create Server", "Choose a name and version.", parent=d)
+                return
+            try:
+                self.status.config(text="Creating " + name.get() + " server…")
+                cfg = server.create(name.get().strip(), kind.get(), version.get(), ram.get(), java.get().strip() or "java")
+                d.destroy()
+                self._refresh_servers()
+                self._load_server_panel(cfg["name"])
+                self.status.config(text="Server created: " + cfg["name"], foreground=SUCCESS)
+            except Exception as e:
+                messagebox.showerror("Create Server", str(e), parent=d)
+
+        ttk.Button(card, text="Create Server", style="Primary.TButton", command=create_now).grid(row=7, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+
+    def _delete_server(self):
+        name = self._server_name
+        if not name:
+            return
+        if messagebox.askyesno("Delete Server", "Delete '" + name + "' and ALL of its files?"):
+            try:
+                server.delete(name)
+                self._server_name = None
+                self._refresh_servers()
+            except Exception as e:
+                messagebox.showerror("Delete Server", str(e))
+
+    def _start_server(self):
+        if not self._server_name:
+            return
+        name = self._server_name
+        try:
+            server.start(name, lambda n, line: self.q.put(("server_output", (n, line), None, None)))
+            self.server_console.insert("end", "[BlemmLauncher] Starting " + name + "…\n")
+            self.server_console.see("end")
+            self._load_server_panel(name)
+        except Exception as e:
+            messagebox.showerror("Start Server", str(e))
+
+    def _stop_server(self):
+        if self._server_name:
+            try:
+                server.stop(self._server_name)
+                self.server_console.insert("end", "[BlemmLauncher] Stop requested.\n")
+                self.server_console.see("end")
+            except Exception as e:
+                messagebox.showerror("Stop Server", str(e))
+
+    def _send_server_command(self):
+        if not self._server_name:
+            return
+        value = self.server_command.get().strip()
+        if not value:
+            return
+        try:
+            server.command(self._server_name, value)
+            self.server_console.insert("end", "> " + value + "\n")
+            self.server_console.see("end")
+            self.server_command.delete(0, "end")
+        except Exception as e:
+            messagebox.showerror("Server Console", str(e))
+
+    def _clear_server_files(self):
+        if not hasattr(self, "server_tree"):
+            return
+        for item in self.server_tree.get_children():
+            self.server_tree.delete(item)
+        self.server_path_label.config(text="/")
+        self.server_edit_label.config(text="Select a text file to edit")
+        self.server_editor.delete("1.0", "end")
+        self._server_edit_path = None
+
+    def _refresh_server_files(self):
+        if not self._server_name:
+            self._clear_server_files()
+            return
+        try:
+            self.server_path_label.config(text="/" + (self._server_path or ""))
+            for item in self.server_tree.get_children():
+                self.server_tree.delete(item)
+            for item in server.tree(self._server_name, self._server_path):
+                size = "" if item["dir"] else (str(item["size"]) + " B")
+                self.server_tree.insert("", "end", iid=item["path"], text=("▸ " if item["dir"] else "   ") + item["name"],
+                                        values=("Folder" if item["dir"] else "File", size))
+        except Exception as e:
+            self.log_message("File manager: " + str(e))
+
+    def _server_open_item(self, _event=None):
+        sel = self.server_tree.selection()
+        if not sel or not self._server_name:
+            return
+        rel = sel[0]
+        try:
+            item = next(x for x in server.tree(self._server_name, self._server_path) if x["path"] == rel)
+            if item["dir"]:
+                self._server_path = rel
+                self._refresh_server_files()
+            else:
+                self._open_server_file(rel)
+        except Exception as e:
+            messagebox.showerror("File Manager", str(e))
+
+    def _open_server_file(self, rel):
+        try:
+            content = server.read_file(self._server_name, rel)
+            self.server_editor.delete("1.0", "end")
+            self.server_editor.insert("1.0", content)
+            self.server_editor.edit_modified(False)
+            self._server_edit_path = rel
+            self._server_editor_dirty = False
+            self.server_edit_label.config(text="Editing  /" + rel, fg=ACCENT)
+        except Exception as e:
+            messagebox.showerror("File Editor", str(e))
+
+    def _server_editor_changed(self, _event=None):
+        if self.server_editor.edit_modified():
+            self._server_editor_dirty = True
+            self.server_editor.edit_modified(False)
+
+    def _save_server_file(self):
+        if not self._server_name or not self._server_edit_path:
+            return
+        try:
+            server.write_file(self._server_name, self._server_edit_path, self.server_editor.get("1.0", "end-1c"))
+            self._server_editor_dirty = False
+            self.server_edit_label.config(text="Saved  /" + self._server_edit_path, fg=SUCCESS)
+            self.status.config(text="Saved " + self._server_edit_path, foreground=SUCCESS)
+        except Exception as e:
+            messagebox.showerror("Save File", str(e))
+
+    def _server_up(self):
+        if self._server_path:
+            self._server_path = os.path.dirname(self._server_path).replace(os.sep, "/")
+            if self._server_path == ".":
+                self._server_path = ""
+            self._refresh_server_files()
+
+    def _server_new_file(self):
+        if not self._server_name:
+            return
+        name = tk.simpledialog.askstring("New File", "File name:", parent=self.root)
+        if not name:
+            return
+        rel = os.path.join(self._server_path, name).replace(os.sep, "/")
+        try:
+            server.create_file(self._server_name, rel)
+            self._refresh_server_files()
+        except Exception as e:
+            messagebox.showerror("New File", str(e))
+
+    def _server_new_folder(self):
+        if not self._server_name:
+            return
+        name = tk.simpledialog.askstring("New Folder", "Folder name:", parent=self.root)
+        if not name:
+            return
+        rel = os.path.join(self._server_path, name).replace(os.sep, "/")
+        try:
+            server.create_folder(self._server_name, rel)
+            self._refresh_server_files()
+        except Exception as e:
+            messagebox.showerror("New Folder", str(e))
+
+    def _server_rename(self):
+        sel = self.server_tree.selection()
+        if not sel or not self._server_name:
+            return
+        old = sel[0]
+        name = tk.simpledialog.askstring("Rename", "New name:", initialvalue=os.path.basename(old), parent=self.root)
+        if not name:
+            return
+        new = os.path.join(os.path.dirname(old), name).replace(os.sep, "/")
+        try:
+            server.rename(self._server_name, old, new)
+            self._refresh_server_files()
+        except Exception as e:
+            messagebox.showerror("Rename", str(e))
+
+    def _server_remove(self):
+        sel = self.server_tree.selection()
+        if not sel or not self._server_name:
+            return
+        rel = sel[0]
+        if not messagebox.askyesno("Delete", "Delete '" + rel + "'?"):
+            return
+        try:
+            server.remove(self._server_name, rel)
+            if self._server_edit_path == rel:
+                self._server_edit_path = None
+                self.server_editor.delete("1.0", "end")
+            self._refresh_server_files()
+        except Exception as e:
+            messagebox.showerror("Delete", str(e))
+
+    def _server_upload(self):
+        if not self._server_name:
+            return
+        paths = filedialog.askopenfilenames(title="Upload server files")
+        if not paths:
+            return
+        try:
+            dest = server.root(self._server_name)
+            folder = server.path(self._server_name, self._server_path)
+            for src in paths:
+                shutil.copy2(src, os.path.join(folder, os.path.basename(src)))
+            self._refresh_server_files()
+            self.status.config(text="Uploaded " + str(len(paths)) + " file(s)", foreground=SUCCESS)
+        except Exception as e:
+            messagebox.showerror("Upload", str(e))
 
     def _build_log_tab(self):
         self.log = scrolledtext.ScrolledText(
@@ -1548,6 +1965,13 @@ class App:
                     self.log_message("OptiFine installed: " + str(text))
                     if self.sel:
                         self._sel_ev()
+
+                elif kind == "server_output":
+                    name, line = text
+                    if hasattr(self, "server_console") and name == self._server_name:
+                        self.server_console.insert("end", str(line) + "\n")
+                        self.server_console.see("end")
+                        self._load_server_panel(name)
 
                 elif kind == "msg":
                     self.log_message(text)
