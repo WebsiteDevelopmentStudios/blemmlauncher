@@ -13,6 +13,7 @@ import webbrowser
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 
 from . import core, instances, server
+from .server_manager import OwnerServerManager
 from Dev import auth as dev_auth
 
 
@@ -800,6 +801,11 @@ class App:
         self._nav_button("Developer", "⚙")
         self._developer_nav_added = True
         self._refresh_nav_buttons()
+
+    def _open_owner_server_manager(self):
+        if not self._dev_identity or self._dev_identity.get("role") != "owner":
+            return
+        OwnerServerManager(self)
 
     def _developer_refresh(self):
         if not self._dev_identity or self._dev_identity.get("role") != "owner":
