@@ -110,7 +110,7 @@ class OwnerServerManager:
         controls.pack(fill="x", padx=16, pady=(0, 8))
         self._button(controls, "Create Server", self.create_server, True).pack(side="left")
         self._button(controls, "Refresh", self.refresh_servers).pack(side="left", padx=6)
-        for label, action in (("Start","start"),("Stop","stop"),("Restart","restart"),("Console","logs")):
+        for label, action in (("Start","start"),("Stop","stop"),("Restart","restart"),("Console → File","logs")):
             self._button(controls, label, lambda a=action: self.server_action(a)).pack(side="left", padx=3)
         self._button(controls, "Delete Server", self.delete_server, danger=True).pack(side="right")
 
@@ -364,10 +364,14 @@ class OwnerServerManager:
                 self.refresh_servers()
             elif action == "logs":
                 lines = (result or {}).get("lines", [])
+                # Console is presented inside the normal file editor rather
+                # than opening a separate console window.
+                self.editor.config(state="normal")
                 self.editor.delete("1.0", "end")
                 self.editor.insert("1.0", "\n".join(str(x.get("line", "")) for x in lines))
-                self.file_var.set("")
-                self.status.set("Console output loaded.")
+                self.editor.config(state="disabled")
+                self.file_var.set("[Console Output — read-only]")
+                self.status.set("Console output loaded into the file editor.")
                 self._schedule_console_refresh()
         self.call(action, {"server": name}, done)
 
@@ -550,6 +554,7 @@ class OwnerServerManager:
         self.refresh_files()
 
     def load_file(self):
+        self.editor.config(state="normal")
         p = self.file_var.get().strip()
         if not p:
             self._show_error("Enter a file path first.")
