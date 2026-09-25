@@ -70,7 +70,17 @@ def start(name, callback=None):
     jar, ram, java, launch = cfg.get("jar", "server.jar"), str(cfg.get("ram", "4G")), cfg.get("java", "java"), cfg.get("launch")
     if not os.path.isfile(path(name, jar)): raise RuntimeError("Server JAR not found: " + jar)
     cmd = ([java, "-Xms" + ram, "-Xmx" + ram, "-jar", jar, "nogui"] if not launch else (["cmd", "/c", launch] if os.name == "nt" else ["sh", launch]))
-    p = subprocess.Popen(cmd, cwd=root(name), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
+    env = os.environ.copy()
+    # Forge/NeoForge run scripts normally call "java" themselves. Put the
+    # managed runtime on PATH and expose JAVA_HOME so those scripts use the
+    # same Java that BlemmLauncher installed for this Minecraft version.
+    java_abs = os.path.abspath(java) if os.path.isabs(str(java)) else shutil.which(str(java))
+    if java_abs:
+        java_bin_dir = os.path.dirname(java_abs)
+        java_home = os.path.dirname(java_bin_dir)
+        env["PATH"] = java_bin_dir + os.pathsep + env.get("PATH", "")
+        env["JAVA_HOME"] = java_home
+    p = subprocess.Popen(cmd, cwd=root(name), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
     PROCESSES[name], CALLBACKS[name] = p, callback
     def reader():
         for line in p.stdout:
