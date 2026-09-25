@@ -172,6 +172,20 @@ class Agent:
                 lines = [x for x in lines if x["server"] == name]
             return {"server": name, "lines": lines[-200:]}
 
+        if action == "versions":
+            kind = str(payload.get("type", "vanilla")).strip().lower()
+            limit = int(payload.get("limit", 80))
+            limit = max(1, min(limit, 200))
+            return {"type": kind, "versions": server.versions(kind, limit)}
+
+        if action == "create_server":
+            if not name:
+                raise RuntimeError("Choose a server name.")
+            kind = str(payload.get("type", "vanilla")).strip().lower()
+            version = str(payload.get("version", "")).strip()
+            ram = str(payload.get("ram", "4G")).strip() or "4G"
+            return server.create(name, kind, version, ram=ram)
+
         if action == "files":
             if not name:
                 raise RuntimeError("Choose a server.")
@@ -193,6 +207,46 @@ class Agent:
                 raise RuntimeError("Remote editor writes are limited to 5 MB.")
             server.write_file(name, rel, content)
             return {"server": name, "path": rel, "saved": True}
+
+        if action == "create_folder":
+            if not name:
+                raise RuntimeError("Choose a server.")
+            rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+            server.create_folder(name, rel)
+            return {"server": name, "path": rel, "created": True}
+
+        if action == "create_file":
+            if not name:
+                raise RuntimeError("Choose a server.")
+            rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+            content = str(payload.get("content", ""))
+            server.create_file(name, rel, content)
+            return {"server": name, "path": rel, "created": True}
+
+        if action == "delete_file":
+            if not name:
+                raise RuntimeError("Choose a server.")
+            rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+            if not rel:
+                raise RuntimeError("Cannot delete the server root.")
+            server.remove(name, rel)
+            return {"server": name, "path": rel, "deleted": True}
+
+        if action == "rename_file":
+            if not name:
+                raise RuntimeError("Choose a server.")
+            old = str(payload.get("old", "")).replace("\\", "/").strip("/")
+            new = str(payload.get("new", "")).replace("\\", "/").strip("/")
+            if not old or not new:
+                raise RuntimeError("Both old and new paths are required.")
+            server.rename(name, old, new)
+            return {"server": name, "old": old, "new": new}
+
+        if action == "delete_server":
+            if not name:
+                raise RuntimeError("Choose a server.")
+            server.delete(name)
+            return {"server": name, "deleted": True}
 
         raise RuntimeError("Unsupported action: " + action)
 
