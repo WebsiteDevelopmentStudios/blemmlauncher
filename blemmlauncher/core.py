@@ -208,21 +208,39 @@ def maven_path(name):
 
 def _required_java(vid):
     try:
-        parts = [int(x) for x in vid.split(".") if x.isdigit()]
+        text = str(vid).strip()
 
-        major = parts[1] if len(parts) > 1 else 0
-        minor = parts[2] if len(parts) > 2 else 0
+        # Starting with Minecraft 26.1, the game/server requires Java 25.
+        # The new 26.x versioning scheme means the first numeric component
+        # is the Minecraft release year, not the old 1.x minor component.
+        m = re.match(r"^(\\d+)\\.(\\d+)", text)
 
-        if major > 20 or (major == 20 and minor >= 5):
-            return "21"
+        if m:
+            first = int(m.group(1))
+            second = int(m.group(2))
 
-        if major >= 18:
-            return "17"
+            if first >= 26:
+                return "25"
 
-        if major == 17:
-            return "16"
+            # Old 1.x Minecraft versioning.
+            if first == 1:
+                major = second
 
-        return "8"
+                parts = [int(x) for x in text.split(".") if x.isdigit()]
+                minor = parts[2] if len(parts) > 2 else 0
+
+                if major > 20 or (major == 20 and minor >= 5):
+                    return "21"
+
+                if major >= 18:
+                    return "17"
+
+                if major == 17:
+                    return "16"
+
+                return "8"
+
+        return "17"
 
     except Exception:
         return "17"
