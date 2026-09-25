@@ -138,6 +138,27 @@ async function verifyToken(token, secret) {
   } catch { return null; }
 }
 
+async function ensureOwner(env) {
+  if (!env.DB || !env.DEV_OWNER_PASSWORD) return;
+
+  const existing = await env.DB.prepare(
+    "SELECT username, role FROM developers WHERE username = ? LIMIT 1"
+  ).bind("Blemm").first();
+
+  if (existing) {
+    if (existing.role !== "owner") {
+      await env.DB.prepare(
+        "UPDATE developers SET role = 'owner' WHERE username = ?"
+      ).bind("Blemm").run();
+    }
+    return;
+  }
+
+  await env.DB.prepare(
+    "INSERT INTO developers (username, password_hash, role) VALUES (?, ?, 'owner')"
+  ).bind("Blemm", await hashPassword(env.DEV_OWNER_PASSWORD)).run();
+}
+
 async function requireOwner(request, env) {
   const supplied = request.headers.get("Authorization") || "";
   const token = supplied.startsWith("Bearer ") ? supplied.slice(7) : "";
