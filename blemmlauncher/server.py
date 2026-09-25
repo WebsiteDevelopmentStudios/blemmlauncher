@@ -142,11 +142,25 @@ def _minecraft_versions(limit=80):
 
 
 def _paper_versions(limit=80):
-    data = _request("https://api.papermc.io/v2/projects/paper")
-    versions = data.get("versions") if isinstance(data, dict) else None
-    if not isinstance(versions, list) or not versions:
-        raise RuntimeError("Paper returned no Minecraft versions.")
-    return list(reversed([str(v) for v in versions]))[:limit]
+    # Paper's public API is the authoritative source for Paper versions.
+    # Keep the request path explicit so redirects/removed endpoints don't
+    # silently turn into an empty selector.
+    urls = [
+        "https://api.papermc.io/v2/projects/paper",
+        "https://papermc.io/api/v2/projects/paper",
+    ]
+    last = None
+    for url in urls:
+        try:
+            data = _request(url)
+            versions = data.get("versions") if isinstance(data, dict) else None
+            if isinstance(versions, list) and versions:
+                return list(reversed([str(v) for v in versions]))[:limit]
+            last = "Paper returned no Minecraft versions."
+        except Exception as ex:
+            last = str(ex)
+    raise RuntimeError(last or "Could not reach the Paper version API.")
+
 
 
 def _forge_versions(limit=80):
