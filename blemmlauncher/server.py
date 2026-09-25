@@ -61,7 +61,10 @@ def start(name, callback=None):
         raise RuntimeError("Server JAR not found: " + jar)
     ram = str(cfg.get("ram", "4G"))
     java = cfg.get("java") or "java"
-    p = subprocess.Popen([java, "-Xms" + ram, "-Xmx" + ram, "-jar", jar, "nogui"], cwd=root(name), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
+    launch = cfg.get("launch")
+    cmd = ([java, "-Xms" + ram, "-Xmx" + ram, "-jar", jar, "nogui"] if not launch
+           else (["cmd", "/c", launch] if os.name == "nt" else ["sh", launch]))
+    p = subprocess.Popen(cmd, cwd=root(name), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
     PROCESSES[name] = p
     CALLBACKS[name] = callback
     def reader():
@@ -152,6 +155,18 @@ def versions(kind, limit=50):
     if kind == "paper":
         data = _json("https://api.papermc.io/v2/projects/paper")
         return list(reversed(data.get("versions", [])))[:limit]
+    if kind == "forge":
+        data = _json("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json")
+        return sorted({k[:-11] for k in data.get("promos", {}) if k.endswith("-recommended")}, reverse=True)[:limit]
+    if kind == "neoforge":
+        data = _json("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")
+        vals = []
+        for build in data if isinstance(data, list) else data.get("versions", []):
+            p = str(build).split(".")
+            mc = p[0] + "." + p[1] if len(p) >= 2 and p[0].isdigit() and p[1].isdigit() else None
+            if mc and mc not in vals:
+                vals.append(mc)
+        return vals[:limit]
     return []
 
 def create(name, kind, version, ram="4G", java="java"):
@@ -191,9 +206,36 @@ def create(name, kind, version, ram="4G", java="java"):
         if r.returncode:
             raise RuntimeError((r.stderr or r.stdout or "Fabric installer failed")[-2000:])
         os.remove(installer)
-    else:
-        raise RuntimeError(kind.title() + " download is not automatic yet. Upload its server JAR with File Manager.")
+    elif kind == "forge":
+        promos = _json("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json").get("promos", {})
+        build = promos.get(version + "-recommended") or promos.get(version + "-latest")
+        if not build:
+            raise RuntimeError("No Forge build found for " + version)
+        installer = os.path.join(d, "forge-installer.jar")
+        _download("https://maven.minecraftforge.net/net/minecraftforge/forge/" + version + "-" + build + "/forge-" + version + "-" + build + "-installer.jar", installer)
+        r = subprocess.run([java, "-jar", "forge-installer.jar", "--installServer"], cwd=d, capture_output=True, text=True, timeout=1800)
+        if r.returncode:
+            raise RuntimeError((r.stderr or r.stdout or "Forge installer failed")[-2500:])
+        os.remove(installer)
+    elif kind == "neoforge":
+        data = _json("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")
+        builds = data if isinstance(data, list) else data.get("versions", [])
+        candidates = [str(x) for x in builds if str(x).startswith(version + ".")]
+        if not candidates:
+            raise RuntimeError("No NeoForge build found for " + version)
+        build = sorted(candidates)[-1]
+        installer = os.path.join(d, "neoforge-installer.jar")
+        _download("https://maven.neoforged.net/releases/net/neoforged/neoforge/" + build + "/neoforge-" + build + "-installer.jar", installer)
+        r = subprocess.run([java, "-jar", "neoforge-installer.jar", "--installServer"], cwd=d, capture_output=True, text=True, timeout=1800)
+        if r.returncode:
+            raise RuntimeError((r.stderr or r.stdout or "NeoForge installer failed")[-2500:])
+        os.remove(installer)
     jar = "server.jar" if os.path.isfile(os.path.join(d, "server.jar")) else "fabric-server-launch.jar"
-    cfg = {"name": name, "type": kind.title(), "version": version, "ram": ram, "java": java, "jar": jar}
+    launch = None
+    if kind in ("forge", "neoforge"):
+        launch = "run.bat" if os.path.isfile(os.path.join(d, "run.bat")) else ("run.sh" if os.path.isfile(os.path.join(d, "run.sh")) else None)
+        if not launch:
+            raise RuntimeError(kind.title() + " installer did not create a run script.")
+    cfg = {"name": name, "type": kind.title(), "version": version, "ram": ram, "java": java, "jar": jar, "launch": launch}
     save(name, cfg)
     return cfg
