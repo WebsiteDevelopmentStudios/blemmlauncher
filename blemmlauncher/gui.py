@@ -6,6 +6,7 @@ import shutil
 import queue
 import threading
 import subprocess
+import socket
 import sys
 import time
 import tkinter as tk
@@ -159,6 +160,7 @@ class App:
         self._remote_agents = []
         self._remote_server = tk.StringVar()
         self._remote_file = tk.StringVar()
+        self._owner_agent_started = False
 
         self._build_header()
         self._build_tabs()
@@ -679,6 +681,8 @@ class App:
             foreground=SUCCESS
         )
         if role == "owner":
+            self._auto_connect_owner_pc()
+        if role == "owner":
             self._developer_nonowner_label.pack_forget()
             self._developer_owner_frame.pack(fill="both", expand=True)
             self._developer_refresh()
@@ -688,6 +692,42 @@ class App:
 
     def _remote_token(self):
         return (self._dev_identity or {}).get("token", "")
+
+    def _auto_connect_owner_pc(self):
+        if self._owner_agent_started:
+            return
+        token = self._remote_token()
+        if not token:
+            return
+        self.status.config(text="Connecting this owner PC…", foreground=MUTED)
+
+        def worker():
+            try:
+                name = socket.gethostname() if "socket" in globals() else ""
+                result = dev_auth.register_owner_agent(token, name)
+                state = {
+                    "agent_id": result["agent_id"],
+                    "agent_token": result["agent_token"],
+                    "name": result.get("name", "Owner PC"),
+                }
+                # Store only the agent credential, never the developer password.
+                root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                state_path = os.path.join(root, "Dev", ".agent.json")
+                os.makedirs(os.path.dirname(state_path), exist_ok=True)
+                with open(state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, indent=2)
+
+                flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+                subprocess.Popen(
+                    [sys.executable, "-m", "Dev.agent"],
+                    cwd=root,
+                    creationflags=flags,
+                )
+                self.q.put(("owner_agent_ready", result, None, None))
+            except Exception as exc:
+                self.q.put(("owner_agent_error", str(exc), None, None))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _remote_pair(self):
         token = self._remote_token()
@@ -2722,7 +2762,22 @@ class App:
                 done = item[2] if len(item) > 2 else None
                 total = item[3] if len(item) > 3 else None
 
-                if kind == "stage":
+                if kind == "owner_agent_ready":
+                    self._remote_agent_id = text.get("agent_id")
+                    self._owner_agent_started = True
+                    self.status.config(
+                        text="Owner PC connected permanently.",
+                        foreground=SUCCESS
+                    )
+                    self._remote_refresh_agents()
+
+                elif kind == "owner_agent_error":
+                    self.status.config(
+                        text="Owner PC connection failed: " + str(text),
+                        foreground=DANGER
+                    )
+
+                elif kind == "stage":
                     self.status.config(text=text, foreground=FG)
                     if total:
                         self.bar.stop()
