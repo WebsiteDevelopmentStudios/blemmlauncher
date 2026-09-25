@@ -396,7 +396,7 @@ class App:
     def _build_play_tab(self):
         """Clean instance dashboard inspired by modern Minecraft launchers."""
         tab = self.play_tab
-        tab.configure(padding=0)
+        tab.configure(padx=0, pady=0)  # Fixed: Changed padding to padx and pady
         tab.columnconfigure(0, weight=1)
         tab.rowconfigure(1, weight=1)
 
