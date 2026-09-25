@@ -1,6 +1,6 @@
 """BlemmLauncher local Minecraft server manager."""
-import json, os, shutil, subprocess, threading, urllib.request, urllib.parse
-from . import instances
+import json, os, shutil, subprocess, threading, urllib.request, urllib.parse, urllib.error, ssl, re
+from . import instances, core
 
 SERVERS_DIR = os.path.join(instances.LAUNCHERS_ROOT, "servers")
 SERVER_TYPES = ("Vanilla", "Paper", "Fabric", "Forge", "NeoForge")
@@ -19,14 +19,36 @@ def path(name, rel=""):
     return p
 
 def _request(url, load_json=True, dest=None):
-    req = urllib.request.Request(url, headers={"User-Agent": "BlemmLauncher/1.3.0"})
-    with urllib.request.urlopen(req, timeout=180 if dest else 40) as r:
-        if dest:
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            tmp = dest + ".part"
-            with open(tmp, "wb") as f: shutil.copyfileobj(r, f)
-            os.replace(tmp, dest)
-        else: return json.load(r)
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "BlemmLauncher/1.3.0",
+            "Accept": "application/json" if not dest else "*/*"
+        }
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180 if dest else 40) as r:
+            if dest:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                tmp = dest + ".part"
+                with open(tmp, "wb") as f:
+                    shutil.copyfileobj(r, f)
+                os.replace(tmp, dest)
+                return None
+            return json.load(r)
+    except urllib.error.URLError as e:
+        if "certificate" in str(e).lower():
+            ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(req, timeout=180 if dest else 40, context=ctx) as r:
+                if dest:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    tmp = dest + ".part"
+                    with open(tmp, "wb") as f:
+                        shutil.copyfileobj(r, f)
+                    os.replace(tmp, dest)
+                    return None
+                return json.load(r)
+        raise
 
 def list_servers():
     os.makedirs(SERVERS_DIR, exist_ok=True)
@@ -99,27 +121,48 @@ def remove(name, rel):
     shutil.rmtree(p) if os.path.isdir(p) else os.remove(p) if os.path.isfile(p) else None
 def rename(name, old, new): os.replace(path(name, old), path(name, new))
 
+def _minecraft_versions(limit=80):
+    data = _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
+    return [x["id"] for x in data.get("versions", []) if x.get("type") == "release"][:limit]
+
+
+def _paper_versions(limit=80):
+    data = _request("https://api.papermc.io/v2/projects/paper")
+    return list(reversed(data.get("versions", [])))[:limit]
+
+
+def _forge_versions(limit=80):
+    data = _request("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json")
+    out = []
+    for key in data.get("promos", {}):
+        if key.endswith("-recommended"):
+            out.append(key[:-12])
+    return sorted(set(out), key=lambda v: [int(x) if x.isdigit() else 0 for x in re.split(r"[.-]", v)], reverse=True)[:limit]
+
+
+def _neoforge_versions(limit=80):
+    data = _request("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")
+    builds = [str(x) for x in data.get("versions", [])]
+    families = []
+    for b in builds:
+        p = b.split(".")
+        if len(p) >= 2:
+            families.append(p[0] + "." + p[1])
+    return list(dict.fromkeys(sorted(families, key=lambda v: [int(x) for x in v.split(".")], reverse=True)))[:limit]
+
+
 def versions(kind, limit=80):
     kind = str(kind).lower().strip()
-    try:
-        if kind in ("vanilla", "fabric"):
-            return [x["id"] for x in _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")["versions"] if x.get("type") == "release"][:limit]
-        if kind == "paper":
-            # Fixed to query active v3 index endpoint instead of deprecated v2 link
-            return list(reversed(_request("https://papermc.io")["versions"]))[:limit]
-        if kind == "forge":
-            return sorted({k[:-11] for k in _request("https://minecraftforge.net")["promos"] if k.endswith("-recommended")}, reverse=True)[:limit]
-        if kind == "neoforge":
-            # Restored normal array splitting indexing properties to prevent internal exception crashes
-            build_list = _request("https://neoforged.net")["versions"]
-            parsed_versions = []
-            for b in build_list:
-                parts = str(b).split(".")
-                if len(parts) >= 2:
-                    parsed_versions.append(parts[0] + "." + parts[1])
-            return list(dict.fromkeys(parsed_versions))[:limit]
-    except Exception: pass
-    return [x["id"] for x in _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")["versions"] if x.get("type") == "release"][:limit]
+    if kind in ("vanilla", "fabric"):
+        return _minecraft_versions(limit)
+    if kind == "paper":
+        return _paper_versions(limit)
+    if kind == "forge":
+        return _forge_versions(limit)
+    if kind == "neoforge":
+        return _neoforge_versions(limit)
+    return _minecraft_versions(limit)
+
 
 def create(name, kind, version, ram="4G", java="java"):
     if not safe_name(name): raise RuntimeError("Invalid server name.")
@@ -165,6 +208,138 @@ def create(name, kind, version, ram="4G", java="java"):
     jar = "server.jar" if os.path.isfile(os.path.join(d, "server.jar")) else "fabric-server-launch.jar"
     launch = "run.bat" if os.path.isfile(os.path.join(d, "run.bat")) else ("run.sh" if os.path.isfile(os.path.join(d, "run.sh")) else None)
     if kind in ("forge", "neoforge") and not launch: raise RuntimeError(kind.title() + " installer did not create a run script.")
+    cfg = {"name": name, "type": kind.title(), "version": version, "ram": ram, "java": java, "jar": jar, "launch": launch}
+    save(name, cfg)
+    return cfg
+def _server_java(version):
+    return core.java_bin_for(str(version))
+
+
+def _run_installer(java, installer, args, cwd, timeout):
+    r = subprocess.run(
+        [java, "-jar", installer] + args,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=timeout
+    )
+    output = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
+    if r.returncode != 0:
+        raise RuntimeError(
+            "Installer failed (exit code " + str(r.returncode) + "):\n"
+            + output[-4000:]
+        )
+    return output
+
+
+def _fabric_server(d, version, java):
+    installers = _request("https://meta.fabricmc.net/v2/versions/installer")
+    if not installers:
+        raise RuntimeError("Fabric returned no installer versions.")
+    installer_path = os.path.join(d, "fabric-installer.jar")
+    _request(installers[0]["url"], dest=installer_path)
+    try:
+        _run_installer(java, installer_path, ["server", "-mcversion", str(version), "-downloadMinecraft"], d, 1800)
+    finally:
+        if os.path.exists(installer_path):
+            os.remove(installer_path)
+
+
+def _forge_server(d, version, java):
+    promos = _request("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json").get("promos", {})
+    build = promos.get(str(version) + "-recommended") or promos.get(str(version) + "-latest")
+    if not build:
+        raise RuntimeError("No Forge build found for Minecraft " + str(version))
+    full = str(version) + "-" + str(build)
+    installer_path = os.path.join(d, "forge-installer.jar")
+    url = "https://maven.minecraftforge.net/net/minecraftforge/forge/" + full + "/forge-" + full + "-installer.jar"
+    _request(url, dest=installer_path)
+    try:
+        _run_installer(java, installer_path, ["--installServer"], d, 1800)
+    finally:
+        if os.path.exists(installer_path):
+            os.remove(installer_path)
+
+
+def _neoforge_server(d, version, java):
+    data = _request("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")
+    builds = [str(x) for x in data.get("versions", [])]
+    parts = str(version).split(".")
+    if len(parts) < 2:
+        raise RuntimeError("Invalid Minecraft version: " + str(version))
+    prefix = parts[1] + "." + (parts[2] if len(parts) > 2 else "0")
+    cands = [b for b in builds if b.startswith(prefix + ".") and "beta" not in b.lower()]
+    if not cands:
+        raise RuntimeError("No NeoForge build found for Minecraft " + str(version))
+    def key(v):
+        return [int(x) for x in v.split(".") if x.isdigit()]
+    build = sorted(cands, key=key, reverse=True)[0]
+    installer_path = os.path.join(d, "neoforge-installer.jar")
+    url = "https://maven.neoforged.net/releases/net/neoforged/neoforge/" + build + "/neoforge-" + build + "-installer.jar"
+    _request(url, dest=installer_path)
+    try:
+        _run_installer(java, installer_path, ["--installServer"], d, 1800)
+    finally:
+        if os.path.exists(installer_path):
+            os.remove(installer_path)
+
+
+def create(name, kind, version, ram="4G", java=None):
+    if not safe_name(name):
+        raise RuntimeError("Invalid server name.")
+    if not version:
+        raise RuntimeError("Select a version.")
+    d = root(name)
+    if os.path.exists(d) and os.listdir(d):
+        raise RuntimeError("That server already exists and contains files.")
+    os.makedirs(d, exist_ok=True)
+    kind, version = str(kind).lower(), str(version)
+    java = java or _server_java(version)
+
+    if kind == "vanilla":
+        entry = next(
+            (x for x in _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json").get("versions", [])
+             if x["id"] == version), None
+        )
+        if not entry:
+            raise RuntimeError("Minecraft version not found.")
+        info = _request(entry["url"])
+        url = info.get("downloads", {}).get("server", {}).get("url")
+        if not url:
+            raise RuntimeError("No official server JAR exists for this version.")
+        _request(url, dest=os.path.join(d, "server.jar"))
+
+    elif kind == "paper":
+        data = _request("https://api.papermc.io/v2/projects/paper/versions/" + urllib.parse.quote(version, safe=""))
+        builds = data.get("builds", [])
+        if not builds:
+            raise RuntimeError("No Paper build found for " + version)
+        build = builds[-1]
+        url = (
+            "https://api.papermc.io/v2/projects/paper/versions/"
+            + urllib.parse.quote(version, safe="")
+            + "/builds/" + str(build) + "/downloads/paper-"
+            + urllib.parse.quote(version, safe="") + "-" + str(build) + ".jar"
+        )
+        _request(url, dest=os.path.join(d, "server.jar"))
+
+    elif kind == "fabric":
+        _fabric_server(d, version, java)
+
+    elif kind == "forge":
+        _forge_server(d, version, java)
+
+    elif kind == "neoforge":
+        _neoforge_server(d, version, java)
+
+    else:
+        raise RuntimeError("Unsupported server type: " + kind)
+
+    jar = "server.jar" if os.path.isfile(os.path.join(d, "server.jar")) else "fabric-server-launch.jar"
+    launch = "run.bat" if os.path.isfile(os.path.join(d, "run.bat")) else ("run.sh" if os.path.isfile(os.path.join(d, "run.sh")) else None)
+    if kind in ("forge", "neoforge") and not launch:
+        raise RuntimeError(kind.title() + " installer did not create a run script.")
+
     cfg = {"name": name, "type": kind.title(), "version": version, "ram": ram, "java": java, "jar": jar, "launch": launch}
     save(name, cfg)
     return cfg
