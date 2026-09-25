@@ -138,7 +138,22 @@ async function verifyToken(token, secret) {
   } catch { return null; }
 }
 
+async function ensureSchema(env) {
+  if (!env.DB) return;
+  const table = await env.DB.prepare("PRAGMA table_info(developers)").all();
+  const columns = new Set((table.results || []).map(row => row.name));
+  if (!columns.has("role")) {
+    await env.DB.prepare(
+      "ALTER TABLE developers ADD COLUMN role TEXT NOT NULL DEFAULT 'developer'"
+    ).run();
+  }
+  await env.DB.prepare(
+    "UPDATE developers SET role = 'owner' WHERE lower(username) = 'blemm'"
+  ).run();
+}
+
 async function ensureOwner(env) {
+  await ensureSchema(env);
   if (!env.DB || !env.DEV_OWNER_PASSWORD) return;
 
   const existing = await env.DB.prepare(
@@ -282,7 +297,9 @@ f.addEventListener("submit", async e => {
     }
 
     if (request.method === "POST" && url.pathname === "/login") {
-      await ensureOwner(env);
+      try {
+        await ensureSchema(env);
+        await ensureOwner(env);
       if (!env.DB) return json({ error: "D1 binding DB is not configured." }, 500);
 
       const body = await parseJson(request);
@@ -316,6 +333,9 @@ f.addEventListener("submit", async e => {
         token: payload + "." + signature,
         expires_at: now + TOKEN_TTL_SECONDS
       });
+      } catch (error) {
+        return json({ error: "Developer authentication service error.", detail: String(error?.message || error) }, 500);
+      }
     }
 
 
