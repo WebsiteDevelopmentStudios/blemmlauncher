@@ -1004,6 +1004,31 @@ class App:
         self.server_meta = tk.Label(info, text="Create a server to get started.",
                                     bg=CARD, fg=MUTED, font=("Segoe UI", 9))
         self.server_meta.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        self.server_network = tk.Frame(info, bg=CARD)
+        self.server_network.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        self.server_network.columnconfigure(1, weight=1)
+        self.server_local_label = tk.Label(
+            self.server_network, text="Local: —", bg=CARD, fg=ACCENT,
+            font=("Consolas", 9, "bold"), anchor="w"
+        )
+        self.server_local_label.grid(row=0, column=0, sticky="w", padx=(0, 14))
+        self.server_lan_label = tk.Label(
+            self.server_network, text="LAN: —", bg=CARD, fg=FG,
+            font=("Consolas", 9), anchor="w"
+        )
+        self.server_lan_label.grid(row=0, column=1, sticky="w")
+        ttk.Button(self.server_network, text="Copy LAN IP", command=self._copy_server_lan).grid(
+            row=0, column=2, sticky="e", padx=(8, 0)
+        )
+        ttk.Button(self.server_network, text="Copy Address", command=self._copy_server_address).grid(
+            row=0, column=3, sticky="e", padx=(8, 0)
+        )
+        self.server_network_hint = tk.Label(
+            self.server_network,
+            text="Use Local on this PC • use LAN from another device on the same Wi‑Fi/network",
+            bg=CARD, fg=MUTED, font=("Segoe UI", 8), anchor="w"
+        )
+        self.server_network_hint.grid(row=1, column=0, columnspan=4, sticky="w", pady=(5, 0))
         controls = tk.Frame(info, bg=CARD)
         controls.grid(row=0, column=2, rowspan=2, sticky="e")
         self.server_start_btn = ttk.Button(controls, text="▶ Start", style="Primary.TButton",
@@ -1208,11 +1233,49 @@ class App:
             state = "RUNNING" if server.running(name) else "STOPPED"
             self.server_title.config(text=name)
             self.server_meta.config(text=f"{cfg.get('type','Server')}  •  Minecraft {cfg.get('version','?')}  •  {cfg.get('ram','4G')} RAM  •  {state}")
+            self._refresh_server_network()
             self.server_start_btn.config(state="disabled" if server.running(name) else "normal")
             self.server_stop_btn.config(state="normal" if server.running(name) else "disabled")
             self._refresh_server_files()
         except Exception as e:
             self.log_message("Server panel error: " + str(e))
+
+    def _refresh_server_network(self):
+        if not self._server_name:
+            return
+        try:
+            info = server.network_info(self._server_name)
+            self.server_local_label.config(text="Local: " + info["local_address"])
+            self.server_lan_label.config(text="LAN: " + info["lan_address"])
+            self.server_network_hint.config(
+                text="Port " + str(info["port"]) + " • Local works on this PC • LAN works from another device on the same network"
+            )
+        except Exception as e:
+            self.server_local_label.config(text="Local: unavailable")
+            self.server_lan_label.config(text="LAN: unavailable")
+            self.server_network_hint.config(text=str(e))
+
+    def _copy_server_lan(self):
+        if not self._server_name:
+            return
+        try:
+            value = server.network_info(self._server_name)["lan_address"]
+            self.root.clipboard_clear()
+            self.root.clipboard_append(value)
+            self.status.config(text="Copied LAN address: " + value, foreground=SUCCESS)
+        except Exception as e:
+            messagebox.showerror("Copy LAN IP", str(e))
+
+    def _copy_server_address(self):
+        if not self._server_name:
+            return
+        try:
+            value = server.network_info(self._server_name)["lan_address"]
+            self.root.clipboard_clear()
+            self.root.clipboard_append(value)
+            self.status.config(text="Copied server address: " + value, foreground=SUCCESS)
+        except Exception as e:
+            messagebox.showerror("Copy Address", str(e))
 
     def _new_server_dialog(self):
         d = tk.Toplevel(self.root)
