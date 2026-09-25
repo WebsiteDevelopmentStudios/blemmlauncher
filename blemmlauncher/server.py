@@ -36,6 +36,8 @@ def _request(url, load_json=True, dest=None):
                 os.replace(tmp, dest)
                 return None
             return json.load(r)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError("HTTP " + str(e.code) + " from " + urllib.parse.urlsplit(url).netloc + ": " + str(e.reason))
     except urllib.error.URLError as e:
         if "certificate" in str(e).lower():
             ctx = ssl._create_unverified_context()
@@ -133,33 +135,49 @@ def rename(name, old, new): os.replace(path(name, old), path(name, new))
 
 def _minecraft_versions(limit=80):
     data = _request("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
-    return [x["id"] for x in data.get("versions", []) if x.get("type") == "release"][:limit]
+    versions = data.get("versions") if isinstance(data, dict) else None
+    if not isinstance(versions, list):
+        raise RuntimeError("Mojang returned an invalid version list.")
+    return [x["id"] for x in versions if isinstance(x, dict) and x.get("type") == "release" and x.get("id")][:limit]
 
 
 def _paper_versions(limit=80):
     data = _request("https://api.papermc.io/v2/projects/paper")
-    return list(reversed(data.get("versions", [])))[:limit]
+    versions = data.get("versions") if isinstance(data, dict) else None
+    if not isinstance(versions, list) or not versions:
+        raise RuntimeError("Paper returned no Minecraft versions.")
+    return list(reversed([str(v) for v in versions]))[:limit]
 
 
 def _forge_versions(limit=80):
     data = _request("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json")
+    promos = data.get("promos") if isinstance(data, dict) else None
+    if not isinstance(promos, dict):
+        raise RuntimeError("Forge returned no version promotions.")
     out = []
-    for key in data.get("promos", {}):
-        if key.endswith("-recommended"):
-            out.append(key[:-12])
+    for key in promos:
+        if str(key).endswith("-recommended"):
+            out.append(str(key)[:-12])
+    if not out:
+        for key in promos:
+            if str(key).endswith("-latest"):
+                out.append(str(key)[:-7])
     return sorted(set(out), key=lambda v: [int(x) if x.isdigit() else 0 for x in re.split(r"[.-]", v)], reverse=True)[:limit]
 
 
 def _neoforge_versions(limit=80):
     data = _request("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge")
-    builds = [str(x) for x in data.get("versions", [])]
+    builds = data.get("versions") if isinstance(data, dict) else None
+    if not isinstance(builds, list):
+        raise RuntimeError("NeoForge returned no versions.")
     families = []
     for b in builds:
-        p = b.split(".")
-        if len(p) >= 2:
-            families.append(p[0] + "." + p[1])
-    return list(dict.fromkeys(sorted(families, key=lambda v: [int(x) for x in v.split(".")], reverse=True)))[:limit]
-
+        parts = str(b).split(".")
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            mc = "1." + parts[0] + "." + parts[1]
+            if mc not in families:
+                families.append(mc)
+    return sorted(families, key=lambda v: [int(x) for x in v.split(".")], reverse=True)[:limit]
 
 def versions(kind, limit=80):
     kind = str(kind).lower().strip()
