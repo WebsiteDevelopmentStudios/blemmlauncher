@@ -1195,7 +1195,10 @@ class App:
     def _server_selected(self, _event=None):
         sel = self.server_list.curselection()
         if sel:
-            self._load_server_panel(self.server_list.get(sel[0]))
+            self._server_name = self.server_list.get(sel[0])
+            if hasattr(self, "delete_server_btn"):
+                self.delete_server_btn.config(state="normal")
+            self._show_server_selector()
 
     def _load_server_panel(self, name):
         self._server_name = name
