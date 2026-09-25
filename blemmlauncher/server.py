@@ -36,8 +36,36 @@ def _request(url, load_json=True, dest=None):
             if dest:
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 tmp = dest + ".part"
+                total = r.headers.get("Content-Length")
+                try:
+                    total = int(total) if total else None
+                except (TypeError, ValueError):
+                    total = None
+                downloaded = 0
+                last_report = 0
                 with open(tmp, "wb") as f:
-                    shutil.copyfileobj(r, f)
+                    while True:
+                        chunk = r.read(256 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if downloaded - last_report >= 512 * 1024 or (total and downloaded >= total):
+                            last_report = downloaded
+                            if total:
+                                core.report(
+                                    "Downloading " + os.path.basename(dest) + " — "
+                                    + "{:.1f}".format(downloaded / (1024 * 1024))
+                                    + " / " + "{:.1f}".format(total / (1024 * 1024)) + " MB",
+                                    downloaded, total
+                                )
+                            else:
+                                core.report(
+                                    "Downloading " + os.path.basename(dest) + " — "
+                                    + "{:.1f}".format(downloaded / (1024 * 1024)) + " MB"
+                                )
+                if total and downloaded < total:
+                    raise RuntimeError("download ended early.")
                 os.replace(tmp, dest)
                 return None
             return json.load(r)
@@ -50,8 +78,26 @@ def _request(url, load_json=True, dest=None):
                 if dest:
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     tmp = dest + ".part"
+                    total = r.headers.get("Content-Length")
+                    try:
+                        total = int(total) if total else None
+                    except (TypeError, ValueError):
+                        total = None
+                    downloaded = 0
                     with open(tmp, "wb") as f:
-                        shutil.copyfileobj(r, f)
+                        while True:
+                            chunk = r.read(256 * 1024)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total:
+                                core.report(
+                                    "Downloading " + os.path.basename(dest) + " — "
+                                    + "{:.1f}".format(downloaded / (1024 * 1024))
+                                    + " / " + "{:.1f}".format(total / (1024 * 1024)) + " MB",
+                                    downloaded, total
+                                )
                     os.replace(tmp, dest)
                     return None
                 return json.load(r)
