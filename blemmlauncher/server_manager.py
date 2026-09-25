@@ -368,7 +368,20 @@ class OwnerServerManager:
                 self.editor.insert("1.0", "\n".join(str(x.get("line", "")) for x in lines))
                 self.file_var.set("")
                 self.status.set("Console output loaded.")
+                self._schedule_console_refresh()
         self.call(action, {"server": name}, done)
+
+    def _schedule_console_refresh(self):
+        if not self.win.winfo_exists():
+            return
+        if self.server_var.get().strip() and self.server.running(self.server_var.get().strip()):
+            self.win.after(2000, self._poll_console)
+    
+    def _poll_console(self):
+        if not self.win.winfo_exists() or not self.server_var.get().strip():
+            return
+        if self.server.running(self.server_var.get().strip()):
+            self.server_action("logs")
 
     def create_server(self):
         if not self.agent:
