@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import urllib.error
 import urllib.request
 from typing import Optional
@@ -19,54 +20,92 @@ DEV_AUTH_URL = os.environ.get(
 ).strip().rstrip("/")
 
 
-def login(username: str, password: str) -> Optional[dict]:
-    """Authenticate a developer against the Cloudflare Worker."""
-    username = (username or "").strip()
-    if not username or not password:
-        raise RuntimeError("Enter your developer username and password.")
-
-    payload = json.dumps({
-        "username": username,
-        "password": password,
-    }).encode("utf-8")
+def _request(
+    path: str,
+    method: str = "GET",
+    body: Optional[dict] = None,
+    token: Optional[str] = None,
+) -> dict:
+    """Make a JSON request to the Worker with useful network diagnostics."""
+    payload = None if body is None else json.dumps(body).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    if token:
+        headers["Authorization"] = "Bearer " + token
 
     request = urllib.request.Request(
-        DEV_AUTH_URL + "/login",
+        DEV_AUTH_URL + path,
         data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
+        headers=headers,
+        method=method,
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        with urllib.request.urlopen(request, timeout=20) as response:
+            raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
         try:
             detail = json.loads(exc.read().decode("utf-8"))
         except Exception:
             detail = {}
         raise RuntimeError(
-            detail.get("error", "Developer authentication failed.")
+            detail.get("error")
+            or detail.get("detail")
+            or f"Developer service returned HTTP {exc.code}."
         ) from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, socket.gaierror):
+            raise RuntimeError(
+                "Could not resolve the Cloudflare developer authentication Worker "
+                f"({DEV_AUTH_URL}). Check your internet/DNS connection."
+            ) from exc
+        if isinstance(reason, TimeoutError):
+            raise RuntimeError(
+                "The Cloudflare developer authentication Worker timed out. "
+                "Check your internet connection and Cloudflare Worker deployment."
+            ) from exc
         raise RuntimeError(
-            "Could not reach the Cloudflare developer authentication Worker."
+            "Could not connect to the Cloudflare developer authentication Worker: "
+            f"{reason}"
+        ) from exc
+    except TimeoutError as exc:
+        raise RuntimeError(
+            "The Cloudflare developer authentication Worker timed out."
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "The Cloudflare developer authentication Worker returned invalid JSON."
         ) from exc
 
-    if not data.get("authenticated") or not data.get("developer"):
-        raise RuntimeError("Invalid developer username or password.")
 
-    return data
+def login(username: str, password: str) -> Optional[dict]:
+    """Authenticate a developer against the Cloudflare Worker."""
+    username = (username or "").strip()
+    if not username or not password:
+        raise RuntimeError("Enter your developer username and password.")
+
+    return _request(
+        "/login",
+        "POST",
+        {"username": username, "password": password},
+    )
+
 
 def list_developers(token: str) -> list[dict]:
     return _request("/developers", "GET", token=token).get("developers", [])
 
 
 def create_developer(token: str, username: str, password: str) -> dict:
-    return _request("/developers", "POST", {"username": username, "password": password}, token)
+    return _request(
+        "/developers",
+        "POST",
+        {"username": username, "password": password},
+        token,
+    )
 
 
 def reset_developer_password(token: str, username: str, password: str) -> dict:
@@ -81,7 +120,11 @@ def reset_developer_password(token: str, username: str, password: str) -> dict:
 
 def delete_developer(token: str, username: str) -> dict:
     from urllib.parse import quote
-    return _request("/developers/" + quote(username, safe=""), "DELETE", token=token)
+    return _request(
+        "/developers/" + quote(username, safe=""),
+        "DELETE",
+        token=token,
+    )
 
 
 def create_agent_pairing(token: str) -> dict:
@@ -89,17 +132,23 @@ def create_agent_pairing(token: str) -> dict:
 
 
 def claim_agent(pairing_code: str, name: str) -> dict:
-    return _request("/agents/claim", "POST", {
-        "code": pairing_code,
-        "name": name,
-    })
+    return _request(
+        "/agents/claim",
+        "POST",
+        {"code": pairing_code, "name": name},
+    )
 
 
 def list_agents(token: str) -> list[dict]:
     return _request("/agents", "GET", token=token).get("agents", [])
 
 
-def send_agent_command(token: str, agent_id: str, action: str, payload: Optional[dict] = None) -> dict:
+def send_agent_command(
+    token: str,
+    agent_id: str,
+    action: str,
+    payload: Optional[dict] = None,
+) -> dict:
     from urllib.parse import quote
     return _request(
         "/agents/" + quote(str(agent_id), safe="") + "/command",
