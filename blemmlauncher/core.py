@@ -23,6 +23,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.3.0"
 
+# ============================================================
+# FORCE REMOVE DEMO MODE GLOBAL BYPASS
+# ============================================================
+_orig_run = subprocess.run
+def _patched_run(cmd, *args, **kwargs):
+    if isinstance(cmd, list) and "--demo" in cmd:
+        cmd.remove("--demo")
+    return _orig_run(cmd, *args, **kwargs)
+subprocess.run = _patched_run
+
 MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 LIB_BASE = "https://libraries.minecraft.net/"
 RESOURCE_BASE = "https://resources.download.minecraft.net/"
