@@ -1091,19 +1091,38 @@ class App:
         )
         card.grid_propagate(False)
 
-        art = tk.Canvas(card, width=223, height=165, bg=c1, highlightthickness=0, bd=0)
+        art = tk.Canvas(card, width=223, height=165, bg="#101814", highlightthickness=0, bd=0)
         art.pack(fill="x")
 
-        # Lightweight generated artwork: sky, horizon, sun and terrain.
-        art.create_rectangle(0, 0, 223, 110, fill=c1, outline="")
-        art.create_oval(164, 16, 198, 50, fill=c2, outline="")
-        art.create_polygon(
-            0, 110, 48, 70, 84, 108, 122, 64, 175, 110,
-            223, 74, 223, 165, 0, 165, fill=c3, outline=""
+        # Loader-specific artwork.  Each instance gets a real visual identity
+        # instead of the old generic landscape, while remaining offline-safe.
+        loader_key = str(cfg.get("loader") or "vanilla").lower()
+        loader_art = {
+            "vanilla": ("#172019", "#6ee7a1", "#0a130e", "MINECRAFT", "◆"),
+            "fabric": ("#182b35", "#62d8ff", "#08151c", "FABRIC", "✦"),
+            "forge": ("#33251d", "#f0a35b", "#160d09", "FORGE", "⚒"),
+            "neoforge": ("#2a202e", "#d7a5ff", "#120b18", "NEOFORGE", "✧"),
+        }
+        c1, c2, c3, art_name, art_symbol = loader_art.get(
+            loader_key, loader_art["vanilla"]
         )
-        art.create_rectangle(0, 135, 223, 165, fill="#0a130e", outline="")
+
+        art.create_rectangle(0, 0, 223, 165, fill=c1, outline="")
+        # Layered diagonal bands give the card a wallpaper-like look.
+        art.create_polygon(0, 118, 78, 34, 136, 165, 0, 165, fill=c3, outline="")
+        art.create_polygon(90, 0, 223, 0, 223, 104, 160, 74, fill=c3, outline="")
+        art.create_oval(150, 18, 206, 74, fill=c2, outline="")
+        art.create_oval(166, 34, 190, 58, fill=c1, outline="")
         art.create_text(
-            12, 15, text=loader.upper(), anchor="nw",
+            16, 15, text=art_name, anchor="nw",
+            fill="#e9fff1", font=("Segoe UI", 9, "bold")
+        )
+        art.create_text(
+            111, 83, text=art_symbol,
+            fill=c2, font=("Segoe UI Symbol", 42, "bold")
+        )
+        art.create_text(
+            16, 138, text=loader.upper(), anchor="sw",
             fill="#d9ffe5", font=("Segoe UI", 8, "bold")
         )
 
