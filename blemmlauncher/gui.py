@@ -169,7 +169,7 @@ class App:
         self._dev_password = tk.StringVar()
         self._remote_agent_id = None
         self._remote_agents = []
-        self._remote_server = tk.StringVar(value="survival")
+        self._remote_server = tk.StringVar(value="Survival")
         self._remote_file = tk.StringVar()
         self._owner_agent_started = False
 
@@ -596,10 +596,10 @@ class App:
         # Developer controls are intentionally locked to the reserved
         # developer server. There is no server-PC or Minecraft-server selector
         # in the Developer UI.
-        self._remote_server.set("survival")
+        self._remote_server.set("Survival")
         ttk.Label(
             remote,
-            text="Target server: SURVIVAL",
+            text="Target server: Survival",
             style="Accent.TLabel"
         ).pack(anchor="w", pady=(0, 7))
 
@@ -811,7 +811,7 @@ class App:
         self._remote_action("status")
 
     def _remote_selected_server(self):
-        return "survival"
+        return "Survival"
 
     def _remote_action(self, action, payload=None):
         # The owner can manage servers on this PC directly. This keeps the
@@ -870,7 +870,7 @@ class App:
             self._remote_status_label.config(text="No connected server is available.", foreground=DANGER)
             return
         payload = dict(payload or {})
-        payload["server"] = "survival"
+        payload["server"] = "Survival"
 
         def worker():
             try:
@@ -905,7 +905,7 @@ class App:
     def _poll_remote_console(self):
         if not self.root.winfo_exists():
             return
-        name = "survival"
+        name = "Survival"
         if name and (
             (self._dev_identity and str(self._dev_identity.get("role", "")).lower() == "owner" and server.running(name))
             or self._remote_agent_id
@@ -917,7 +917,7 @@ class App:
         if not command:
             return
         self._remote_command_entry.delete(0, "end")
-        self._remote_action("console", {"server": "survival", "command": command})
+        self._remote_action("console", {"server": "Survival", "command": command})
 
     def _remote_read_file(self):
         rel = self._remote_file.get().strip()
