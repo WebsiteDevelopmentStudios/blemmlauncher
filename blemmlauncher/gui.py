@@ -3206,7 +3206,7 @@ class App:
                     else:
                         self._remote_agent_id = None
                         self._remote_agent_combo.set("")
-                            self._remote_status_label.config(text="No paired server PCs.", foreground=MUTED)
+                        self._remote_status_label.config(text="No paired server PCs.", foreground=MUTED)
 
                 elif kind == "remote_result":
                     action, result_status, result = text
