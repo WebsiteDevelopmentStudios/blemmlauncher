@@ -458,7 +458,11 @@ f.addEventListener("submit", async e => {
       const body = await parseJson(request);
       const action = typeof body?.action === "string" ? body.action.trim() : "";
       const payload = body?.payload && typeof body.payload === "object" ? body.payload : {};
-      const allowed = new Set(["status", "start", "stop", "restart", "console", "logs", "files", "read_file", "write_file"]);
+      const allowed = new Set([
+        "status", "versions", "create_server", "start", "stop", "restart",
+        "console", "logs", "files", "read_file", "write_file",
+        "create_folder", "create_file", "delete_file", "rename_file", "delete_server"
+      ]);
       if (!allowed.has(action)) return json({ error: "Unsupported server action." }, 400);
       const payloadText = JSON.stringify(payload);
       if (payloadText.length > 900000) return json({ error: "Command payload is too large." }, 413);
