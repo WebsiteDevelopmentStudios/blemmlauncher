@@ -2950,7 +2950,7 @@ class App:
                     self._select_instance(name)
 
                 elif kind == "modrinth_home_results":
-                    mc_version, sections = text
+                    mc_version, loader, sections = text
                     self._modrinth_searching = False
                     self._modrinth_home_loaded = True
                     self._modrinth_clear_cards()
@@ -2977,10 +2977,7 @@ class App:
                             self.modrinth_cards = section
                             self._store_card(
                                 hit, self.modrinth_target.get().strip(),
-                                mc_version,
-                                (instances.load_cfg(self.modrinth_target.get().strip()).get("loader")
-                                 if self.modrinth_target.get().strip() else None),
-                                ptype
+                                mc_version, loader, ptype, parent=section
                             )
                         self.modrinth_cards = self._modrinth_cards_root
                     # Restore the actual scroll content frame.
