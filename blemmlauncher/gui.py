@@ -164,7 +164,7 @@ class App:
         self._dev_password = tk.StringVar()
         self._remote_agent_id = None
         self._remote_agents = []
-        self._remote_server = tk.StringVar()
+        self._remote_server = tk.StringVar(value="survival")
         self._remote_file = tk.StringVar()
         self._owner_agent_started = False
 
@@ -574,16 +574,15 @@ class App:
                                                style="MutedCard.TLabel")
         self._remote_pairing_label.pack(side="left", padx=(12, 0))
 
-        agent_row = ttk.Frame(remote, style="Card.TFrame")
-        agent_row.pack(fill="x", pady=(0, 7))
-        ttk.Label(agent_row, text="Server PC", style="MutedCard.TLabel").pack(side="left")
-        self._remote_agent_combo = ttk.Combobox(agent_row, state="readonly", width=26)
-        self._remote_agent_combo.pack(side="left", padx=(8, 10))
-        self._remote_agent_combo.bind("<<ComboboxSelected>>", self._remote_agent_selected)
-        ttk.Label(agent_row, text="Minecraft server", style="MutedCard.TLabel").pack(side="left")
-        ttk.Combobox(agent_row, textvariable=self._remote_server, state="readonly", width=24,
-                     name="remote_server_combo").pack(side="left", padx=(8, 0))
-        self._remote_server_combo = agent_row.children["remote_server_combo"]
+        # Developer controls are intentionally locked to the reserved
+        # developer server. There is no server-PC or Minecraft-server selector
+        # in the Developer UI.
+        self._remote_server.set("survival")
+        ttk.Label(
+            remote,
+            text="Target server: SURVIVAL",
+            style="Accent.TLabel"
+        ).pack(anchor="w", pady=(0, 7))
 
         control_row = ttk.Frame(remote, style="Card.TFrame")
         control_row.pack(fill="x", pady=(0, 7))
@@ -591,7 +590,7 @@ class App:
                               ("Restart", "restart"), ("Console", "logs")):
             ttk.Button(control_row, text=label,
                        command=lambda a=action: self._remote_action(a)).pack(side="left", padx=(0, 6))
-        self._remote_status_label = ttk.Label(control_row, text="No remote server selected.",
+        self._remote_status_label = ttk.Label(control_row, text="Survival server ready.",
                                               style="MutedCard.TLabel")
         self._remote_status_label.pack(side="left", padx=(8, 0))
 
@@ -793,7 +792,7 @@ class App:
         self._remote_action("status")
 
     def _remote_selected_server(self):
-        return self._remote_server.get().strip()
+        return "survival"
 
     def _remote_action(self, action, payload=None):
         # The owner can manage servers on this PC directly. This keeps the
@@ -849,11 +848,10 @@ class App:
         token = self._remote_token()
         agent_id = self._remote_agent_id
         if not token or not agent_id:
-            self._remote_status_label.config(text="Select a connected server PC first.", foreground=DANGER)
+            self._remote_status_label.config(text="No connected server is available.", foreground=DANGER)
             return
         payload = dict(payload or {})
-        if action not in ("status", "logs"):
-            payload.setdefault("server", self._remote_selected_server())
+        payload["server"] = "survival"
 
         def worker():
             try:
@@ -888,7 +886,7 @@ class App:
     def _poll_remote_console(self):
         if not self.root.winfo_exists():
             return
-        name = self._remote_selected_server()
+        name = "survival"
         if name and (
             (self._dev_identity and str(self._dev_identity.get("role", "")).lower() == "owner" and server.running(name))
             or self._remote_agent_id
@@ -900,13 +898,13 @@ class App:
         if not command:
             return
         self._remote_command_entry.delete(0, "end")
-        self._remote_action("console", {"server": self._remote_selected_server(), "command": command})
+        self._remote_action("console", {"server": "survival", "command": command})
 
     def _remote_read_file(self):
         rel = self._remote_file.get().strip()
         if not rel:
             return
-        self._remote_action("read_file", {"server": self._remote_selected_server(), "path": rel})
+        self._remote_action("read_file", {"server": "survival", "path": rel})
 
     def _remote_write_file(self):
         rel = self._remote_file.get().strip()
@@ -914,7 +912,7 @@ class App:
             return
         content = self._remote_console.get("1.0", "end-1c")
         self._remote_action("write_file", {
-            "server": self._remote_selected_server(),
+            "server": "survival",
             "path": rel,
             "content": content,
         })
@@ -3189,8 +3187,7 @@ class App:
                     else:
                         self._remote_agent_id = None
                         self._remote_agent_combo.set("")
-                        self._remote_server_combo.configure(values=[])
-                        self._remote_status_label.config(text="No paired server PCs.", foreground=MUTED)
+                            self._remote_status_label.config(text="No paired server PCs.", foreground=MUTED)
 
                 elif kind == "remote_result":
                     action, result_status, result = text
@@ -3200,10 +3197,6 @@ class App:
                         self._remote_status_label.config(text=action.title() + " completed", foreground=SUCCESS)
                         if action == "status":
                             servers = result.get("servers", [])
-                            names = [str(x.get("name", "")) for x in servers]
-                            self._remote_server_combo.configure(values=names)
-                            if self._remote_server.get() not in names:
-                                self._remote_server.set(names[0] if names else "")
                         elif action == "logs":
                             self._remote_console.delete("1.0", "end")
                             for line in result.get("lines", []):
