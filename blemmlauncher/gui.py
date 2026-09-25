@@ -630,7 +630,8 @@ class App:
                 cursor="hand2",
             )
 
-        owner_button(owner_actions, "Refresh Developers", self._developer_refresh).pack(side="left")
+        owner_button(owner_actions, "Server Management", self._open_owner_server_manager, True).pack(side="left")
+        owner_button(owner_actions, "Refresh Developers", self._developer_refresh).pack(side="left", padx=(8, 0))
         owner_button(
             owner_actions, "+ Create Developer", self._developer_create, primary=True
         ).pack(side="left", padx=(8, 0))
