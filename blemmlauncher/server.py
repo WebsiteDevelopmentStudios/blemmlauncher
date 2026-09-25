@@ -136,7 +136,7 @@ def create(name, kind, version, ram="4G", java="java"):
     elif kind in ("fabric", "forge", "neoforge"):
         installer = os.path.join(d, kind + "-installer.jar")
         if kind == "fabric":
-            _request(_request("https://fabricmc.net")["url"], dest=installer)
+            _request(_request("https://fabricmc.net")[0]["url"], dest=installer)
             args = [java, "-jar", kind + "-installer.jar", "server", "-mcversion", version, "-downloadMinecraft"]
         elif kind == "forge":
             build = _request("https://minecraftforge.net")["promos"].get(version + "-recommended") or _request("https://minecraftforge.net")["promos"].get(version + "-latest")
