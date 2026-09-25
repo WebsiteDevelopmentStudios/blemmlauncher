@@ -650,6 +650,115 @@ class App:
             self._developer_owner_frame.pack_forget()
             self._developer_nonowner_label.pack(anchor="w", pady=(8, 0))
 
+    def _remote_token(self):
+        return (self._dev_identity or {}).get("token", "")
+
+    def _remote_pair(self):
+        token = self._remote_token()
+        if not token:
+            return
+        def worker():
+            try:
+                result = dev_auth.create_agent_pairing(token)
+                self.q.put(("remote_pair", result, None, None))
+            except Exception as exc:
+                self.q.put(("remote_error", str(exc), None, None))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _remote_launch_agent(self):
+        try:
+            root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+            subprocess.Popen([sys.executable, "-m", "Dev.agent"], cwd=root, creationflags=flags)
+            self.status.config(text="Started the Developer Server Agent on this PC.", foreground=SUCCESS)
+        except Exception as exc:
+            messagebox.showerror("Developer Server Agent", str(exc))
+
+    def _remote_refresh_agents(self):
+        token = self._remote_token()
+        if not token:
+            return
+        def worker():
+            try:
+                rows = dev_auth.list_agents(token)
+                self.q.put(("remote_agents", rows, None, None))
+            except Exception as exc:
+                self.q.put(("remote_error", str(exc), None, None))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _remote_agent_selected(self, _event=None):
+        index = self._remote_agent_combo.current()
+        if index < 0 or index >= len(self._remote_agents):
+            return
+        agent = self._remote_agents[index]
+        self._remote_agent_id = agent.get("id")
+        self._remote_status_label.config(
+            text=str(agent.get("status", "offline")).upper(),
+            foreground=SUCCESS if agent.get("status") == "online" else DANGER
+        )
+        self._remote_action("status")
+
+    def _remote_selected_server(self):
+        return self._remote_server.get().strip()
+
+    def _remote_action(self, action, payload=None):
+        token = self._remote_token()
+        agent_id = self._remote_agent_id
+        if not token or not agent_id:
+            self._remote_status_label.config(text="Select a connected server PC first.", foreground=DANGER)
+            return
+        payload = dict(payload or {})
+        if action not in ("status", "logs"):
+            payload.setdefault("server", self._remote_selected_server())
+
+        def worker():
+            try:
+                queued = dev_auth.send_agent_command(token, agent_id, action, payload)
+                command_id = queued.get("command_id")
+                if not command_id:
+                    raise RuntimeError("Worker did not return a command id.")
+                for _ in range(45):
+                    time.sleep(1)
+                    rows = dev_auth.list_agent_commands(token, agent_id)
+                    row = next((x for x in rows if int(x.get("id", -1)) == int(command_id)), None)
+                    if row and row.get("status") in ("completed", "error"):
+                        try:
+                            result = json.loads(row.get("result") or "{}")
+                        except Exception:
+                            result = {"raw": row.get("result", "")}
+                        self.q.put(("remote_result", (action, row.get("status"), result), None, None))
+                        return
+                raise RuntimeError("Remote server did not answer within 45 seconds.")
+            except Exception as exc:
+                self.q.put(("remote_error", str(exc), None, None))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._remote_status_label.config(text="Sending " + action + "…", foreground=MUTED)
+
+    def _remote_send_console(self):
+        command = self._remote_command_entry.get().strip()
+        if not command:
+            return
+        self._remote_command_entry.delete(0, "end")
+        self._remote_action("console", {"server": self._remote_selected_server(), "command": command})
+
+    def _remote_read_file(self):
+        rel = self._remote_file.get().strip()
+        if not rel:
+            return
+        self._remote_action("read_file", {"server": self._remote_selected_server(), "path": rel})
+
+    def _remote_write_file(self):
+        rel = self._remote_file.get().strip()
+        if not rel:
+            return
+        content = self._remote_console.get("1.0", "end-1c")
+        self._remote_action("write_file", {
+            "server": self._remote_selected_server(),
+            "path": rel,
+            "content": content,
+        })
+
     def _add_developer_nav(self):
         if getattr(self, "_developer_nav_added", False):
             return
