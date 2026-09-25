@@ -373,7 +373,7 @@ class App:
             canvas.create_oval(x2-2*r, y2-2*r, x2, y2, fill=fill, outline="")
             if active:
                 canvas.create_rectangle(2, 11, 5, 33, fill=ACCENT, outline="")
-            icons = {"Play": "⌂", "Install": "+", "Modrinth": "◇", "Server": "▣", "Profile": "●", "Logs": "≡"}
+            icons = {"Play": "⌂", "Install": "+", "Modrinth": "◇", "Server": "▣", "Profile": "●", "Logs": "≡", "Developer": "⚙"}
             canvas.create_text(
                 27, 22, text=icons[name],
                 fill=ACCENT if active else MUTED,
