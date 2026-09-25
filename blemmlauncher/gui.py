@@ -1,6 +1,7 @@
 """BlemmLauncher GUI - tabbed desktop launcher UI."""
 
 import os
+import json
 import shutil
 import queue
 import threading
@@ -137,7 +138,9 @@ class App:
         self._server_edit_path = None
         self._server_editor_dirty = False
 
-        self._uname = tk.StringVar(value="Blemm")
+        self._profile_path = os.path.join(instances.LAUNCHERS_ROOT, "profile.json")
+        self._profile = self._load_profile()
+        self._uname = tk.StringVar(value=self._profile.get("username", "Blemm"))
         self._ram = tk.StringVar(value="4G")
         self._optifine = tk.BooleanVar(value=False)
 
@@ -193,6 +196,7 @@ class App:
         self.loader_tab = tk.Frame(self.content_area, bg=BG)
         self.modrinth_tab = tk.Frame(self.content_area, bg=BG)
         self.server_tab = tk.Frame(self.content_area, bg=BG)
+        self.profile_tab = tk.Frame(self.content_area, bg=BG)
         self.log_tab = tk.Frame(self.content_area, bg=BG)
 
         self.pages = {
@@ -200,6 +204,7 @@ class App:
             "Install": self.loader_tab,
             "Modrinth": self.modrinth_tab,
             "Server": self.server_tab,
+            "Profile": self.profile_tab,
             "Logs": self.log_tab,
         }
 
@@ -210,6 +215,7 @@ class App:
         self._build_loader_tab()
         self._build_modrinth_tab()
         self._build_server_tab()
+        self._build_profile_tab()
         self._build_log_tab()
 
         self._build_navigation()
@@ -253,6 +259,7 @@ class App:
             ("Install", "+"),
             ("Modrinth", "◇"),
             ("Server", "▣"),
+            ("Profile", "●"),
             ("Logs", "≡"),
         ]:
             self._nav_button(name, icon)
@@ -321,6 +328,9 @@ class App:
         page = self.pages.get(name)
         if page is None:
             return
+        if name == "Server" and not server.list_servers():
+            self._new_server_dialog()
+            return
         page.lift()
         self._page_name = name
         self.current_page.config(text=name)
@@ -350,7 +360,7 @@ class App:
             canvas.create_oval(x2-2*r, y2-2*r, x2, y2, fill=fill, outline="")
             if active:
                 canvas.create_rectangle(2, 11, 5, 33, fill=ACCENT, outline="")
-            icons = {"Play": "⌂", "Install": "+", "Modrinth": "◇", "Server": "▣", "Logs": "≡"}
+            icons = {"Play": "⌂", "Install": "+", "Modrinth": "◇", "Server": "▣", "Profile": "●", "Logs": "≡"}
             canvas.create_text(
                 27, 22, text=icons[name],
                 fill=ACCENT if active else MUTED,
@@ -389,6 +399,51 @@ class App:
         x = start + int(distance * ((step + 1) / steps))
         self.drawer.place_configure(x=x)
         self.root.after(12, lambda: self._animate_drawer(start, end, step + 1))
+
+    def _load_profile(self):
+        try:
+            if os.path.exists(self._profile_path):
+                with open(self._profile_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict) and data.get("username"):
+                    return data
+        except Exception:
+            pass
+        return {"username": "Blemm"}
+
+    def _save_profile(self):
+        username = self._uname.get().strip()
+        if not username or len(username) > 16 or not all(c.isalnum() or c == "_" for c in username):
+            messagebox.showerror("Profile", "Username must be 1–16 characters using only letters, numbers, or underscores.")
+            return
+        os.makedirs(os.path.dirname(self._profile_path), exist_ok=True)
+        with open(self._profile_path, "w", encoding="utf-8") as f:
+            json.dump({"username": username}, f, indent=2)
+        for name in instances.list_instances():
+            try:
+                cfg = instances.load_cfg(name)
+                cfg["username"] = username
+                instances.save_cfg(name, cfg)
+            except Exception:
+                pass
+        self.status.config(text="Profile saved • " + username, foreground=SUCCESS)
+
+    def _build_profile_tab(self):
+        tab = self.profile_tab
+        tab.columnconfigure(0, weight=1)
+        card = ttk.Frame(tab, style="Card.TFrame", padding=24)
+        card.grid(row=0, column=0, sticky="new", padx=8, pady=8)
+        ttk.Label(card, text="Profile", style="Big.TLabel").pack(anchor="w")
+        ttk.Label(card, text="Choose the username BlemmLauncher uses for local/offline Minecraft launches.",
+                  style="MutedCard.TLabel", wraplength=700).pack(anchor="w", pady=(4, 20))
+        ttk.Label(card, text="Minecraft username", style="MutedCard.TLabel").pack(anchor="w")
+        row = ttk.Frame(card, style="Card.TFrame")
+        row.pack(fill="x", pady=(6, 8))
+        ttk.Entry(row, textvariable=self._uname, width=28).pack(side="left")
+        ttk.Button(row, text="Save Profile", style="Primary.TButton",
+                   command=self._save_profile).pack(side="left", padx=(10, 0))
+        ttk.Label(card, text="16 characters max • letters, numbers, and underscores.",
+                  style="MutedCard.TLabel").pack(anchor="w")
 
     def _build_status(self):
         box = ttk.Frame(self.root)
@@ -655,7 +710,7 @@ class App:
         )
         self.loader_version_combo = ttk.Combobox(
             card, textvariable=self.loader_version,
-            values=["release"], state="readonly"
+            values=["Loading versions…"], state="readonly"
         )
         self.loader_version_combo.grid(
             row=2, column=1, sticky="ew", padx=(12, 0), pady=6
@@ -691,6 +746,8 @@ class App:
         self._refresh_loader_instances()
 
     def _loader_changed(self, _event=None):
+        if self._all_versions:
+            self.loader_version_combo.configure(values=["release"] + self._all_versions)
         if self.loader_type.get().lower() == "vanilla":
             self.loader_info.config(
                 text="Vanilla installs the selected Minecraft version with no mod loader."
@@ -902,6 +959,9 @@ class App:
         self.server_list.pack(fill="y", expand=True)
         self.server_list.bind("<<ListboxSelect>>", self._server_selected)
         ttk.Button(left, text="Delete Server", command=self._delete_server).pack(fill="x", pady=(8, 0))
+        self.server_locked_label = tk.Label(left, text="🔒 Create a server first",
+                                            bg=CARD, fg=MUTED, font=("Segoe UI", 8))
+        self.server_locked_label.pack(anchor="w", padx=4, pady=(8, 2))
 
         right = tk.Frame(tab, bg=BG)
         right.grid(row=1, column=1, sticky="nsew")
@@ -1003,6 +1063,12 @@ class App:
 
         self._refresh_servers()
 
+    def _update_server_access(self):
+        unlocked = bool(server.list_servers())
+        self._server_access = unlocked
+        if hasattr(self, "server_locked_label"):
+            self.server_locked_label.config(text="✓ Panel unlocked" if unlocked else "🔒 Create a server first")
+
     def _refresh_servers(self):
         if not hasattr(self, "server_list"):
             return
@@ -1099,7 +1165,12 @@ class App:
                 cfg = server.create(name.get().strip(), kind.get(), version.get(), ram.get(), java.get().strip() or "java")
                 d.destroy()
                 self._refresh_servers()
+                self._update_server_access()
                 self._load_server_panel(cfg["name"])
+                self.server_tab.lift()
+                self._page_name = "Server"
+                self.current_page.config(text="Server")
+                self._refresh_nav_buttons()
                 self.status.config(text="Server created: " + cfg["name"], foreground=SUCCESS)
             except Exception as e:
                 messagebox.showerror("Create Server", str(e), parent=d)
@@ -1500,12 +1571,21 @@ class App:
             self.play_btn.config(state="disabled")
 
             if loader == "vanilla":
-                cfg = instances.load_cfg(name)
-                cfg["loader"] = None
-                cfg["loader_build"] = None
-                cfg["version"] = mc_version
-                instances.save_cfg(name, cfg)
-                self.q.put(("loader_installed", (name, "vanilla", mc_version), None, None))
+                def vanilla_worker():
+                    try:
+                        instances.install_vanilla(mc_version)
+                        cfg = instances.load_cfg(name)
+                        cfg["loader"] = None
+                        cfg["loader_build"] = None
+                        cfg["version"] = mc_version
+                        instances.save_cfg(name, cfg)
+                        self.q.put(("loader_installed", (name, "vanilla", mc_version), None, None))
+                    except Exception as e:
+                        self.q.put(("fatal", "Minecraft installation failed:\n" + str(e), None, None))
+                self.status.config(text="Installing Minecraft " + mc_version + "…")
+                self.bar.config(mode="indeterminate")
+                self.bar.start(15)
+                threading.Thread(target=vanilla_worker, daemon=True).start()
                 return
 
             self.status.config(
@@ -1886,9 +1966,10 @@ class App:
                         text=str(len(text)) + " Minecraft versions loaded",
                         foreground=MUTED
                     )
-                    self.loader_version_combo.configure(
-                        values=["release"] + text
-                    )
+                    values = ["release"] + list(text)
+                    self.loader_version_combo.configure(values=values)
+                    if self.loader_version.get() not in values:
+                        self.loader_version.set("release")
 
                 elif kind == "loader_installed":
                     name, loader, vid = text
