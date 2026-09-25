@@ -1,2 +1,3 @@
 users.json
 *.json.tmp
+.agent.json
