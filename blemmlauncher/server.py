@@ -134,7 +134,7 @@ def tree(name, rel=""):
 def read_file(name, rel):
     p = path(name, rel)
     if not os.path.isfile(p): raise RuntimeError("File not found.")
-    if os.path.getsize(p) > 2000000: raise RuntimeError("File is larger than the 2 MB editor limit.")
+    if os.path.getsize(p) > 50 * 1024 * 1024: raise RuntimeError("File is larger than the 50 MB editor limit.")
     try:
         with open(p, encoding="utf-8") as f: return f.read()
     except UnicodeDecodeError: raise RuntimeError("Binary files cannot be edited as text.")
