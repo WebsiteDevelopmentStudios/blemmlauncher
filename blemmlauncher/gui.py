@@ -796,6 +796,56 @@ class App:
         return self._remote_server.get().strip()
 
     def _remote_action(self, action, payload=None):
+        # The owner can manage servers on this PC directly. This keeps the
+        # Developer tab in sync with Owner Server Management instead of waiting
+        # for the relay/agent round trip.
+        if self._dev_identity and str(self._dev_identity.get("role", "")).lower() == "owner":
+            payload = dict(payload or {})
+            name = str(payload.get("server", "")).strip() or self._remote_selected_server()
+            if action not in ("status", "logs") and not name:
+                self._remote_status_label.config(text="Choose a Minecraft server first.", foreground=DANGER)
+                return
+            def local_worker():
+                try:
+                    if action == "status":
+                        rows = []
+                        for n in server.list_servers():
+                            try:
+                                cfg = server.load(n)
+                                rows.append({"name": n, "running": bool(server.running(n)),
+                                              "type": cfg.get("type"), "version": cfg.get("version"),
+                                              "ram": cfg.get("ram")})
+                            except Exception:
+                                rows.append({"name": n, "running": bool(server.running(n))})
+                        result = {"servers": rows}
+                    elif action == "logs":
+                        result = {"server": name, "lines": server.get_logs(name)}
+                    elif action == "console":
+                        command = str(payload.get("command", "")).strip()
+                        if not command:
+                            raise RuntimeError("Console command is empty.")
+                        server.command(name, command)
+                        result = {"server": name, "sent": command}
+                    elif action == "start":
+                        server.start(name)
+                        result = {"server": name, "running": True}
+                    elif action == "stop":
+                        server.stop(name)
+                        result = {"server": name, "running": False}
+                    elif action == "restart":
+                        server.stop(name)
+                        time.sleep(1.5)
+                        server.start(name)
+                        result = {"server": name, "running": True}
+                    else:
+                        raise RuntimeError("Unsupported local developer action: " + action)
+                    self.q.put(("remote_result", (action, "completed", result), None, None))
+                except Exception as exc:
+                    self.q.put(("remote_error", str(exc), None, None))
+            threading.Thread(target=local_worker, daemon=True).start()
+            self._remote_status_label.config(text="Running " + action + "…", foreground=MUTED)
+            return
+
         token = self._remote_token()
         agent_id = self._remote_agent_id
         if not token or not agent_id:
@@ -1429,8 +1479,8 @@ class App:
                     raw = r.read()
                 image = Image.open(io.BytesIO(raw)).convert("RGBA")
                 image.thumbnail((size, size), Image.Resampling.LANCZOS)
-                photo = ImageTk.PhotoImage(image)
-                self.q.put(("modrinth_image", (parent, key, photo), None, None))
+                # ImageTk.PhotoImage must be created on Tk's main thread.
+                self.q.put(("modrinth_image", (parent, key, image), None, None))
             except Exception:
                 pass
 
@@ -2988,8 +3038,9 @@ class App:
                     )
 
                 elif kind == "modrinth_image":
-                    parent, key, photo = text
+                    parent, key, image = text
                     if parent is not None and parent.winfo_exists():
+                        photo = ImageTk.PhotoImage(image)
                         parent.configure(image=photo, text="")
                         parent.image = photo
                         self._modrinth_image_refs[key] = photo
