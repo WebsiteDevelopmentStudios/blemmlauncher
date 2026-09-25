@@ -2806,6 +2806,7 @@ class App:
                         foreground=SUCCESS
                     )
                     self.log_message("Developer authenticated: " + username)
+                    self._remote_refresh_agents()
 
                 elif kind == "dev_login_error":
                     self._dev_status_label.config(
@@ -2822,6 +2823,60 @@ class App:
                     )
                     self.log_message("Developer authentication failed: " + str(text))
 
+
+                elif kind == "remote_pair":
+                    code = str((text or {}).get("pairing_code", ""))
+                    self._remote_pairing_label.config(
+                        text="Pairing code: " + code + "  • expires in 10 minutes",
+                        foreground=SUCCESS
+                    )
+                    self.status.config(text="Pairing code generated. Run the agent on the server PC.", foreground=SUCCESS)
+
+                elif kind == "remote_agents":
+                    self._remote_agents = list(text or [])
+                    values = [
+                        str(a.get("name", "Unnamed")) + "  •  " + str(a.get("status", "offline"))
+                        for a in self._remote_agents
+                    ]
+                    self._remote_agent_combo.configure(values=values)
+                    if self._remote_agents:
+                        if self._remote_agent_id not in [a.get("id") for a in self._remote_agents]:
+                            self._remote_agent_id = self._remote_agents[0].get("id")
+                        index = next((i for i, a in enumerate(self._remote_agents) if a.get("id") == self._remote_agent_id), 0)
+                        self._remote_agent_combo.current(index)
+                        self._remote_action("status")
+                    else:
+                        self._remote_agent_id = None
+                        self._remote_agent_combo.set("")
+                        self._remote_server_combo.configure(values=[])
+                        self._remote_status_label.config(text="No paired server PCs.", foreground=MUTED)
+
+                elif kind == "remote_result":
+                    action, result_status, result = text
+                    if result_status == "error":
+                        self._remote_status_label.config(text=str(result.get("error", "Remote action failed.")), foreground=DANGER)
+                    else:
+                        self._remote_status_label.config(text=action.title() + " completed", foreground=SUCCESS)
+                        if action == "status":
+                            servers = result.get("servers", [])
+                            names = [str(x.get("name", "")) for x in servers]
+                            self._remote_server_combo.configure(values=names)
+                            if self._remote_server.get() not in names:
+                                self._remote_server.set(names[0] if names else "")
+                        elif action == "logs":
+                            self._remote_console.delete("1.0", "end")
+                            for line in result.get("lines", []):
+                                self._remote_console.insert("end", str(line.get("line", "")) + "\n")
+                            self._remote_console.see("end")
+                        elif action == "read_file":
+                            self._remote_console.delete("1.0", "end")
+                            self._remote_console.insert("1.0", result.get("content", ""))
+                        elif action == "write_file":
+                            self.status.config(text="Saved remote file: " + str(result.get("path", "")), foreground=SUCCESS)
+
+                elif kind == "remote_error":
+                    self._remote_status_label.config(text="Remote server error: " + str(text), foreground=DANGER)
+                    self.status.config(text="Remote developer server action failed", foreground=DANGER)
 
                 elif kind == "developer_list":
                     for item in self._developer_tree.get_children():
