@@ -1,6 +1,7 @@
 """BlemmLauncher GUI - tabbed desktop launcher UI."""
 
 import os
+import shutil
 import queue
 import threading
 import tkinter as tk
