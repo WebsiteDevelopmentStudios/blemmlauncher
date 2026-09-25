@@ -1214,65 +1214,109 @@ class App:
     def _new_server_dialog(self):
         d = tk.Toplevel(self.root)
         d.title("Create Server")
-        d.geometry("520x430")
+        d.geometry("600x480")
+        d.minsize(560, 430)
         d.configure(bg=BG)
         d.transient(self.root)
         d.grab_set()
-        card = ttk.Frame(d, style="Card.TFrame", padding=18)
-        card.pack(fill="both", expand=True)
-        card.columnconfigure(1, weight=1)
 
         name = tk.StringVar(value="My Server")
         kind = tk.StringVar(value="Paper")
         version = tk.StringVar()
         ram = tk.StringVar(value="4G")
         java = tk.StringVar(value="")
+        step = tk.IntVar(value=0)
 
-        ttk.Label(card, text="Create a Server", style="Big.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 14))
-        ttk.Label(card, text="Server name", style="MutedCard.TLabel").grid(row=1, column=0, sticky="w", pady=7)
-        ttk.Entry(card, textvariable=name).grid(row=1, column=1, sticky="ew", padx=(12, 0), pady=7)
-        ttk.Label(card, text="Server type", style="MutedCard.TLabel").grid(row=2, column=0, sticky="w", pady=7)
-        type_box = ttk.Combobox(card, textvariable=kind, values=list(server.SERVER_TYPES), state="readonly")
-        type_box.grid(row=2, column=1, sticky="ew", padx=(12, 0), pady=7)
-        ttk.Label(card, text="Minecraft version", style="MutedCard.TLabel").grid(row=3, column=0, sticky="w", pady=7)
-        version_box = ttk.Combobox(card, textvariable=version, state="readonly")
-        version_box.grid(row=3, column=1, sticky="ew", padx=(12, 0), pady=7)
-        ttk.Label(card, text="RAM", style="MutedCard.TLabel").grid(row=4, column=0, sticky="w", pady=7)
-        ttk.Combobox(card, textvariable=ram, values=["2G","4G","6G","8G","12G","16G"], state="readonly").grid(row=4, column=1, sticky="ew", padx=(12, 0), pady=7)
-        ttk.Label(card, text="Java executable", style="MutedCard.TLabel").grid(row=5, column=0, sticky="w", pady=7)
-        java_entry = ttk.Entry(card, textvariable=java)
-        java_entry.grid(row=5, column=1, sticky="ew", padx=(12, 0), pady=7)
-        ttk.Label(card, text="Leave blank to automatically install/use the required Java version.",
-                  style="MutedCard.TLabel").grid(row=6, column=1, sticky="w", padx=(12, 0), pady=(0, 4))
-        info = ttk.Label(card, text="Loading versions…", style="MutedCard.TLabel", wraplength=430)
-        info.grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 8))
+        shell = tk.Frame(d, bg=BG)
+        shell.pack(fill="both", expand=True, padx=18, pady=18)
+        progress = tk.Label(shell, text="1  •  Name     2  •  Server     3  •  Java",
+                            bg=BG, fg=MUTED, font=("Segoe UI", 9, "bold"))
+        progress.pack(anchor="w", pady=(0, 12))
+
+        pages = [ttk.Frame(shell, style="Card.TFrame", padding=20) for _ in range(3)]
+
+        ttk.Label(pages[0], text="Name your server", style="Big.TLabel").pack(anchor="w")
+        ttk.Label(pages[0], text="Choose a name and memory allocation.",
+                  style="MutedCard.TLabel").pack(anchor="w", pady=(4, 18))
+        ttk.Label(pages[0], text="Server name", style="MutedCard.TLabel").pack(anchor="w")
+        ttk.Entry(pages[0], textvariable=name).pack(fill="x", pady=(6, 14), ipady=5)
+        ttk.Label(pages[0], text="RAM", style="MutedCard.TLabel").pack(anchor="w")
+        ttk.Combobox(pages[0], textvariable=ram,
+                     values=["2G","4G","6G","8G","12G","16G"],
+                     state="readonly").pack(fill="x", pady=(6, 0), ipady=4)
+
+        ttk.Label(pages[1], text="Choose server software", style="Big.TLabel").pack(anchor="w")
+        ttk.Label(pages[1], text="Select the Minecraft version and server type.",
+                  style="MutedCard.TLabel").pack(anchor="w", pady=(4, 18))
+        ttk.Label(pages[1], text="Server type", style="MutedCard.TLabel").pack(anchor="w")
+        type_box = ttk.Combobox(pages[1], textvariable=kind,
+                                values=list(server.SERVER_TYPES), state="readonly")
+        type_box.pack(fill="x", pady=(6, 14), ipady=4)
+        ttk.Label(pages[1], text="Minecraft version", style="MutedCard.TLabel").pack(anchor="w")
+        version_box = ttk.Combobox(pages[1], textvariable=version, state="readonly")
+        version_box.pack(fill="x", pady=(6, 6), ipady=4)
+        version_info = ttk.Label(pages[1], text="Loading versions…",
+                                 style="MutedCard.TLabel", wraplength=500)
+        version_info.pack(anchor="w", pady=(4, 0))
+
+        ttk.Label(pages[2], text="Java (optional)", style="Big.TLabel").pack(anchor="w")
+        ttk.Label(pages[2],
+                  text="Leave this empty to automatically install and use the required Java runtime.",
+                  style="MutedCard.TLabel", wraplength=500).pack(anchor="w", pady=(4, 18))
+        ttk.Label(pages[2], text="Java executable", style="MutedCard.TLabel").pack(anchor="w")
+        ttk.Entry(pages[2], textvariable=java).pack(fill="x", pady=(6, 8), ipady=5)
+        ttk.Label(pages[2],
+                  text="Optional. Example: C:\\Program Files\\Java\\bin\\java.exe",
+                  style="MutedCard.TLabel", wraplength=500).pack(anchor="w")
+
+        buttons = tk.Frame(shell, bg=BG)
+        buttons.pack(fill="x", pady=(12, 0))
+        back = ttk.Button(buttons, text="Back")
+        back.pack(side="left")
+        next_btn = ttk.Button(buttons, text="Next", style="Primary.TButton")
+        next_btn.pack(side="right")
+
+        def show(n):
+            step.set(n)
+            for p in pages: p.pack_forget()
+            pages[n].pack(fill="both", expand=True)
+            back.config(state="normal" if n else "disabled")
+            next_btn.config(text="Create Server" if n == 2 else "Next")
+            progress.config(text=[
+                "1  •  Name     2  •  Server     3  •  Java",
+                "✓ Name     2  •  Server     3  •  Java",
+                "✓ Name     ✓ Server     3  •  Java"
+            ][n])
 
         def load_versions():
             try:
                 vals = server.versions(kind.get())
-                self.root.after(0, lambda: (version_box.configure(values=vals), version.set(vals[0] if vals else "")))
-                self.root.after(0, lambda: info.config(text=("Select a version and create the server." if vals else "This server type needs a JAR/installer upload after creation.")))
+                d.after(0, lambda: version_box.configure(values=vals))
+                d.after(0, lambda: version.set(vals[0] if vals else ""))
+                d.after(0, lambda: version_info.config(
+                    text="Select the Minecraft version to install." if vals else "No versions were returned."
+                ))
             except Exception as e:
-                self.root.after(0, lambda: info.config(text="Could not load versions: " + str(e)))
+                d.after(0, lambda: version_info.config(text="Could not load versions: " + str(e)))
 
         def type_changed(_e=None):
             version.set("")
+            version_info.config(text="Loading versions…")
             threading.Thread(target=load_versions, daemon=True).start()
 
-        type_box.bind("<<ComboboxSelected>>", type_changed)
-        threading.Thread(target=load_versions, daemon=True).start()
-
         def create_now():
-            if not name.get().strip() or not version.get():
-                messagebox.showinfo("Create Server", "Choose a name and version.", parent=d)
-                return
+            if not name.get().strip():
+                show(0); messagebox.showinfo("Create Server", "Enter a server name.", parent=d); return
+            if not version.get():
+                show(1); messagebox.showinfo("Create Server", "Choose a Minecraft version.", parent=d); return
             try:
-                self.status.config(text="Creating " + name.get() + " server…")
-                cfg = server.create(name.get().strip(), kind.get(), version.get(), ram.get(), java.get().strip() or None)
+                self.status.config(text="Creating " + name.get().strip() + " server…")
+                cfg = server.create(name.get().strip(), kind.get(), version.get(), ram.get(),
+                                    java.get().strip() or None)
                 d.destroy()
                 self._refresh_servers()
                 self._update_server_access()
-                self._load_server_panel(cfg["name"])
+                self._show_server_selector()
                 self.server_tab.lift()
                 self._page_name = "Server"
                 self.current_page.config(text="Server")
@@ -1281,7 +1325,24 @@ class App:
             except Exception as e:
                 messagebox.showerror("Create Server", str(e), parent=d)
 
-        ttk.Button(card, text="Create Server", style="Primary.TButton", command=create_now).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        def next_step():
+            n = step.get()
+            if n == 0:
+                if not name.get().strip():
+                    messagebox.showinfo("Create Server", "Enter a server name.", parent=d); return
+                show(1)
+            elif n == 1:
+                if not version.get():
+                    messagebox.showinfo("Create Server", "Choose a Minecraft version.", parent=d); return
+                show(2)
+            else:
+                create_now()
+
+        back.config(command=lambda: show(max(0, step.get() - 1)))
+        next_btn.config(command=next_step)
+        type_box.bind("<<ComboboxSelected>>", type_changed)
+        show(0)
+        threading.Thread(target=load_versions, daemon=True).start()
 
     def _delete_server(self):
         name = self._server_name
@@ -1778,86 +1839,112 @@ class App:
     def new_inst(self):
         d = tk.Toplevel(self.root)
         d.title("New Minecraft Instance")
-        d.geometry("460x330")
+        d.geometry("600x470")
+        d.minsize(560, 420)
         d.configure(bg=BG)
-        style_dark(d)
+        d.transient(self.root)
         d.grab_set()
-
-        f = ttk.Frame(d, style="Card.TFrame", padding=16)
-        f.pack(fill="both", expand=True)
-        f.columnconfigure(1, weight=1)
 
         name = tk.StringVar(value="My Minecraft")
         version = tk.StringVar(value="release")
         loader = tk.StringVar(value="vanilla")
-        ram = tk.StringVar(value="4G")
+        ram = tk.StringVar(value=self._ram.get() or "4G")
         uname = tk.StringVar(value=self._uname.get() or "Blemm")
+        step = tk.IntVar(value=0)
 
-        rows = [
-            ("Name", ttk.Entry(f, textvariable=name)),
-            (
-                "Minecraft",
-                ttk.Combobox(
-                    f, textvariable=version,
-                    values=["release"], state="readonly"
-                )
-            ),
-            (
-                "Loader",
-                ttk.Combobox(
-                    f, textvariable=loader,
-                    values=["vanilla", "fabric", "neoforge", "forge"],
-                    state="readonly"
-                )
-            ),
-            (
-                "RAM",
-                ttk.Combobox(
-                    f, textvariable=ram,
-                    values=["2G", "4G", "6G", "8G", "12G"],
-                    state="readonly"
-                )
-            ),
-            ("Username", ttk.Entry(f, textvariable=uname)),
-        ]
-        for r, (label, widget) in enumerate(rows):
-            ttk.Label(f, text=label, style="MutedCard.TLabel").grid(
-                row=r, column=0, sticky="w", pady=5
-            )
-            widget.grid(row=r, column=1, sticky="ew", padx=(12, 0), pady=5)
+        shell = tk.Frame(d, bg=BG)
+        shell.pack(fill="both", expand=True, padx=18, pady=18)
+        progress = tk.Label(shell, text="1  •  Name     2  •  Minecraft     3  •  Profile",
+                            bg=BG, fg=MUTED, font=("Segoe UI", 9, "bold"))
+        progress.pack(anchor="w", pady=(0, 12))
+        pages = [ttk.Frame(shell, style="Card.TFrame", padding=20) for _ in range(3)]
 
-        def apply_versions():
-            try:
-                vals = self._all_versions or core.list_versions()[0]
-                self.root.after(
-                    0,
-                    lambda: rows[1][1].configure(values=["release"] + vals)
-                    if d.winfo_exists() else None
-                )
-            except Exception:
-                pass
+        ttk.Label(pages[0], text="Name your instance", style="Big.TLabel").pack(anchor="w")
+        ttk.Label(pages[0], text="Choose a name for this Minecraft installation.",
+                  style="MutedCard.TLabel").pack(anchor="w", pady=(4, 18))
+        ttk.Label(pages[0], text="Instance name", style="MutedCard.TLabel").pack(anchor="w")
+        ttk.Entry(pages[0], textvariable=name).pack(fill="x", pady=(6, 0), ipady=5)
 
-        threading.Thread(target=apply_versions, daemon=True).start()
+        ttk.Label(pages[1], text="Choose Minecraft", style="Big.TLabel").pack(anchor="w")
+        ttk.Label(pages[1], text="Select the game version and loader.",
+                  style="MutedCard.TLabel").pack(anchor="w", pady=(4, 18))
+        ttk.Label(pages[1], text="Minecraft version", style="MutedCard.TLabel").pack(anchor="w")
+        version_box = ttk.Combobox(pages[1], textvariable=version,
+                                   values=["release"], state="readonly")
+        version_box.pack(fill="x", pady=(6, 14), ipady=4)
+        ttk.Label(pages[1], text="Loader", style="MutedCard.TLabel").pack(anchor="w")
+        ttk.Combobox(pages[1], textvariable=loader,
+                     values=["vanilla","fabric","neoforge","forge"],
+                     state="readonly").pack(fill="x", pady=(6, 0), ipady=4)
+
+        ttk.Label(pages[2], text="Profile & memory", style="Big.TLabel").pack(anchor="w")
+        ttk.Label(pages[2], text="These settings are saved to the instance.",
+                  style="MutedCard.TLabel").pack(anchor="w", pady=(4, 18))
+        ttk.Label(pages[2], text="Username", style="MutedCard.TLabel").pack(anchor="w")
+        ttk.Entry(pages[2], textvariable=uname).pack(fill="x", pady=(6, 14), ipady=5)
+        ttk.Label(pages[2], text="RAM", style="MutedCard.TLabel").pack(anchor="w")
+        ttk.Combobox(pages[2], textvariable=ram,
+                     values=["2G","4G","6G","8G","12G","16G"],
+                     state="readonly").pack(fill="x", pady=(6, 0), ipady=4)
+
+        buttons = tk.Frame(shell, bg=BG)
+        buttons.pack(fill="x", pady=(12, 0))
+        back = ttk.Button(buttons, text="Back")
+        back.pack(side="left")
+        next_btn = ttk.Button(buttons, text="Next", style="Primary.TButton")
+        next_btn.pack(side="right")
+
+        def show(n):
+            step.set(n)
+            for p in pages: p.pack_forget()
+            pages[n].pack(fill="both", expand=True)
+            back.config(state="normal" if n else "disabled")
+            next_btn.config(text="Create Instance" if n == 2 else "Next")
+            progress.config(text=[
+                "1  •  Name     2  •  Minecraft     3  •  Profile",
+                "✓ Name     2  •  Minecraft     3  •  Profile",
+                "✓ Name     ✓ Minecraft     3  •  Profile"
+            ][n])
 
         def create_now():
             try:
                 v = version.get()
                 if v == "release":
                     v = core.manifest()["latest"]["release"]
-                ld = None if loader.get() == "vanilla" else loader.get()
+                if not v:
+                    raise RuntimeError("Choose a Minecraft version.")
                 instance_name = name.get().strip() or "My Minecraft"
-                instances.create(
-                    instance_name, v, ld, ram.get(), uname.get() or "Blemm"
-                )
+                ld = None if loader.get() == "vanilla" else loader.get()
+                instances.create(instance_name, v, ld, ram.get(), uname.get() or "Blemm")
                 d.destroy()
                 self._refresh_list()
                 self._select_instance(instance_name)
             except Exception as e:
                 messagebox.showerror("New Instance", str(e), parent=d)
 
-        ttk.Button(
-            f, text="Create Instance", style="Primary.TButton", command=create_now
-        ).grid(row=len(rows), column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        def next_step():
+            n = step.get()
+            if n == 0:
+                if not name.get().strip():
+                    messagebox.showinfo("New Instance", "Enter an instance name.", parent=d); return
+                show(1)
+            elif n == 1:
+                show(2)
+            else:
+                create_now()
+
+        back.config(command=lambda: show(max(0, step.get() - 1)))
+        next_btn.config(command=next_step)
+
+        def apply_versions():
+            try:
+                vals = self._all_versions or core.list_versions()[0]
+                d.after(0, lambda: version_box.configure(values=["release"] + vals))
+            except Exception:
+                pass
+
+        show(0)
+        threading.Thread(target=apply_versions, daemon=True).start()
 
     def del_inst(self):
         if not self.sel:
