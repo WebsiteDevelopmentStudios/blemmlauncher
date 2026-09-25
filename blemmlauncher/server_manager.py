@@ -167,7 +167,7 @@ class OwnerServerManager:
                                 rows.append({"name": n, "running": bool(server.running(n))})
                         result = {"servers": rows}
                     elif action == "start":
-                        server.start(name, lambda n, line: None)
+                        server.start(name)
                         result = {"server": name, "running": True}
                     elif action == "stop":
                         server.stop(name)
@@ -175,10 +175,10 @@ class OwnerServerManager:
                     elif action == "restart":
                         server.stop(name)
                         time.sleep(1.5)
-                        server.start(name, lambda n, line: None)
+                        server.start(name)
                         result = {"server": name, "running": True}
                     elif action == "logs":
-                        result = {"server": name, "lines": []}
+                        result = {"server": name, "lines": server.get_logs(name)}
                     elif action == "create_server":
                         result = server.create(name, str(payload.get("type", "paper")).strip().lower(), str(payload.get("version", "")).strip(), ram=str(payload.get("ram", "4G")).strip() or "4G", allow_reserved=True)
                     elif action == "files":
