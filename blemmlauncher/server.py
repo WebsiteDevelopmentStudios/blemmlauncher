@@ -10,6 +10,10 @@ PROCESSES, CALLBACKS = {}, {}
 def safe_name(name):
     return bool(name) and name not in (".", "..") and not any(c in name for c in '<>:|?*"') and "/" not in name and "\\" not in name
 
+
+def is_reserved_name(name):
+    return str(name).strip().casefold() == "survival"
+
 def root(name):
     if not safe_name(name): raise RuntimeError("Invalid server name.")
     return os.path.join(SERVERS_DIR, name)
@@ -437,6 +441,8 @@ def _neoforge_server(d, version, java):
 
 
 def create(name, kind, version, ram="4G", java=None):
+    if is_reserved_name(name):
+        raise RuntimeError("That server name is used by the devs.")
     if not safe_name(name):
         raise RuntimeError("Invalid server name.")
     if not version:
