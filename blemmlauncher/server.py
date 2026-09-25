@@ -1,12 +1,14 @@
 """BlemmLauncher local Minecraft server manager."""
-import json, os, shutil, subprocess, threading, urllib.request, urllib.parse, urllib.error, ssl, re
+import json, os, shutil, subprocess, threading, urllib.request, urllib.parse, urllib.error, ssl, re, time
+from collections import deque
 from . import instances, core, database
 
 SERVERS_DIR = os.path.join(instances.LAUNCHERS_ROOT, "servers")
 SERVER_TYPES = ("Vanilla", "Paper", "Fabric", "Forge", "NeoForge")
 MAX_SERVERS = 2
-PROCESSES, CALLBACKS = {}
-SERVER_LOGS = {}, {}
+PROCESSES = {}
+CALLBACKS = {}
+SERVER_LOGS = {}
 
 def safe_name(name):
     return bool(name) and name not in (".", "..") and not any(c in name for c in '<>:|?*"') and "/" not in name and "\\" not in name
