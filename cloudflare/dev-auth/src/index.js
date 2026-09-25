@@ -166,6 +166,48 @@ async function requireOwner(request, env) {
   return identity?.role === "owner" ? identity : null;
 }
 
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(String(value)));
+  return hex(new Uint8Array(digest));
+}
+
+function randomToken(bytes = 32) {
+  return b64url(crypto.getRandomValues(new Uint8Array(bytes)));
+}
+
+function randomPairingCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, b => alphabet[b % alphabet.length]).join("");
+}
+
+async function ensureAgentTables(env) {
+  if (!env.DB) return;
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agent_pairings (code TEXT PRIMARY KEY, created_by TEXT NOT NULL, expires_at INTEGER NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'offline', last_seen INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agent_commands (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, action TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending', result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+  ]);
+}
+
+async function requireDeveloper(request, env) {
+  const supplied = request.headers.get("Authorization") || "";
+  const token = supplied.startsWith("Bearer ") ? supplied.slice(7) : "";
+  return await verifyToken(token, env.DEV_AUTH_SECRET);
+}
+
+async function requireAgent(request, env) {
+  if (!env.DB) return null;
+  const supplied = request.headers.get("Authorization") || "";
+  const token = supplied.startsWith("Bearer ") ? supplied.slice(7) : "";
+  if (!token) return null;
+  const tokenHash = await sha256Hex(token);
+  return await env.DB.prepare(
+    "SELECT id, name, status, last_seen FROM agents WHERE token_hash = ? LIMIT 1"
+  ).bind(tokenHash).first();
+}
+
 async function requireAdmin(request, env) {
   if (!env.DEV_AUTH_SECRET) return false;
   const supplied = request.headers.get("Authorization") || "";
@@ -327,6 +369,148 @@ f.addEventListener("submit", async e => {
       ).bind(username).run();
       if (!result.meta?.changes) return json({ error: "Developer not found." }, 404);
       return json({ deleted: true, username });
+    }
+
+
+    // Remote developer server relay. The actual server stays behind the
+    // machine running the BlemmLauncher agent; only HTTPS polling reaches it.
+    if (request.method === "POST" && url.pathname === "/agents/pair") {
+      const identity = await requireDeveloper(request, env);
+      if (!identity) return json({ error: "Developer authorization required." }, 401);
+      await ensureAgentTables(env);
+      const code = randomPairingCode();
+      const expiresAt = Math.floor(Date.now() / 1000) + 600;
+      await env.DB.prepare(
+        "DELETE FROM agent_pairings WHERE created_by = ? OR expires_at < ?"
+      ).bind(identity.username, Math.floor(Date.now() / 1000)).run();
+      await env.DB.prepare(
+        "INSERT INTO agent_pairings (code, created_by, expires_at) VALUES (?, ?, ?)"
+      ).bind(code, identity.username, expiresAt).run();
+      return json({ pairing_code: code, expires_at: expiresAt });
+    }
+
+    if (request.method === "POST" && url.pathname === "/agents/claim") {
+      await ensureAgentTables(env);
+      const body = await parseJson(request);
+      const code = typeof body?.code === "string" ? body.code.trim().toUpperCase() : "";
+      const name = typeof body?.name === "string" ? body.name.trim() : "";
+      if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code)) return json({ error: "Invalid pairing code." }, 400);
+      if (!/^[A-Za-z0-9 ._-]{1,64}$/.test(name)) return json({ error: "Invalid agent name." }, 400);
+      const pairing = await env.DB.prepare(
+        "SELECT code, expires_at FROM agent_pairings WHERE code = ? LIMIT 1"
+      ).bind(code).first();
+      if (!pairing || Number(pairing.expires_at) < Math.floor(Date.now() / 1000)) {
+        return json({ error: "Pairing code expired or invalid." }, 400);
+      }
+
+      const agentId = randomToken(12);
+      const agentToken = randomToken(32);
+      await env.DB.prepare(
+        "INSERT INTO agents (id, name, token_hash, status, last_seen) VALUES (?, ?, ?, 'online', ?)"
+      ).bind(agentId, name, await sha256Hex(agentToken), Math.floor(Date.now() / 1000)).run();
+      await env.DB.prepare("DELETE FROM agent_pairings WHERE code = ?").bind(code).run();
+      return json({ paired: true, agent_id: agentId, agent_token: agentToken, name });
+    }
+
+    if (request.method === "GET" && url.pathname === "/agents") {
+      const identity = await requireDeveloper(request, env);
+      if (!identity) return json({ error: "Developer authorization required." }, 401);
+      await ensureAgentTables(env);
+      const result = await env.DB.prepare(
+        "SELECT id, name, status, last_seen, created_at FROM agents ORDER BY name COLLATE NOCASE"
+      ).all();
+      const now = Math.floor(Date.now() / 1000);
+      const agents = (result.results || []).map(a => ({
+        ...a,
+        status: a.last_seen && now - Number(a.last_seen) <= 15 ? "online" : "offline"
+      }));
+      return json({ agents });
+    }
+
+    const agentCommandMatch = url.pathname.match(/^\/agents\/([^/]+)\/command$/);
+    if (request.method === "POST" && agentCommandMatch) {
+      const identity = await requireDeveloper(request, env);
+      if (!identity) return json({ error: "Developer authorization required." }, 401);
+      await ensureAgentTables(env);
+      const agentId = decodeURIComponent(agentCommandMatch[1]);
+      const agent = await env.DB.prepare("SELECT id FROM agents WHERE id = ? LIMIT 1").bind(agentId).first();
+      if (!agent) return json({ error: "Agent not found." }, 404);
+      const body = await parseJson(request);
+      const action = typeof body?.action === "string" ? body.action.trim() : "";
+      const payload = body?.payload && typeof body.payload === "object" ? body.payload : {};
+      const allowed = new Set(["status", "start", "stop", "restart", "console", "logs", "files", "read_file", "write_file"]);
+      if (!allowed.has(action)) return json({ error: "Unsupported server action." }, 400);
+      const payloadText = JSON.stringify(payload);
+      if (payloadText.length > 900000) return json({ error: "Command payload is too large." }, 413);
+      const result = await env.DB.prepare(
+        "INSERT INTO agent_commands (agent_id, action, payload, status) VALUES (?, ?, ?, 'pending')"
+      ).bind(agentId, action, payloadText).run();
+      return json({ queued: true, command_id: result.meta.last_row_id });
+    }
+
+    const agentCommandsMatch = url.pathname.match(/^\/agents\/([^/]+)\/commands$/);
+    if (request.method === "GET" && agentCommandsMatch) {
+      const identity = await requireDeveloper(request, env);
+      if (!identity) return json({ error: "Developer authorization required." }, 401);
+      await ensureAgentTables(env);
+      const agentId = decodeURIComponent(agentCommandsMatch[1]);
+      const result = await env.DB.prepare(
+        "SELECT id, action, status, result, created_at, updated_at FROM agent_commands WHERE agent_id = ? ORDER BY id DESC LIMIT 50"
+      ).bind(agentId).all();
+      return json({ commands: result.results || [] });
+    }
+
+    if (request.method === "GET" && url.pathname === "/agent/poll") {
+      const agent = await requireAgent(request, env);
+      if (!agent) return json({ error: "Agent authorization required." }, 401);
+      await ensureAgentTables(env);
+      const now = Math.floor(Date.now() / 1000);
+      await env.DB.prepare(
+        "UPDATE agents SET status = 'online', last_seen = ? WHERE id = ?"
+      ).bind(now, agent.id).run();
+      const command = await env.DB.prepare(
+        "SELECT id, action, payload FROM agent_commands WHERE agent_id = ? AND status = 'pending' ORDER BY id ASC LIMIT 1"
+      ).bind(agent.id).first();
+      if (command) {
+        await env.DB.prepare(
+          "UPDATE agent_commands SET status = 'dispatched', updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        ).bind(command.id).run();
+        return json({ command: {
+          id: command.id,
+          action: command.action,
+          payload: JSON.parse(command.payload || "{}")
+        }});
+      }
+      return json({ command: null });
+    }
+
+    if (request.method === "POST" && url.pathname === "/agent/heartbeat") {
+      const agent = await requireAgent(request, env);
+      if (!agent) return json({ error: "Agent authorization required." }, 401);
+      await ensureAgentTables(env);
+      const body = await parseJson(request);
+      const status = typeof body?.status === "string" ? body.status.slice(0, 32) : "online";
+      await env.DB.prepare(
+        "UPDATE agents SET status = ?, last_seen = ? WHERE id = ?"
+      ).bind(status, Math.floor(Date.now() / 1000), agent.id).run();
+      return json({ ok: true });
+    }
+
+    if (request.method === "POST" && url.pathname === "/agent/result") {
+      const agent = await requireAgent(request, env);
+      if (!agent) return json({ error: "Agent authorization required." }, 401);
+      await ensureAgentTables(env);
+      const body = await parseJson(request);
+      const commandId = Number(body?.command_id);
+      const status = typeof body?.status === "string" ? body.status : "completed";
+      const result = JSON.stringify(body?.result ?? {});
+      if (!Number.isInteger(commandId) || result.length > 900000) {
+        return json({ error: "Invalid command result." }, 400);
+      }
+      await env.DB.prepare(
+        "UPDATE agent_commands SET status = ?, result = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND agent_id = ?"
+      ).bind(status, result, commandId, agent.id).run();
+      return json({ ok: true });
     }
 
     return json({ error: "Not found." }, 404);
