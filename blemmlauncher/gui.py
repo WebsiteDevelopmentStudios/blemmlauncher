@@ -186,99 +186,213 @@ class App:
         self.bar.pack(fill="x", pady=(4, 0))
 
     def _build_play_tab(self):
+        """Clean instance dashboard inspired by modern Minecraft launchers."""
         tab = self.play_tab
-        tab.columnconfigure(0, weight=0)
-        tab.columnconfigure(1, weight=1)
-        tab.rowconfigure(0, weight=1)
+        tab.configure(padding=0)
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
 
-        left = ttk.Frame(tab, style="Card.TFrame", padding=12)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        top = tk.Frame(tab, bg=BG)
+        top.grid(row=0, column=0, sticky="ew", pady=(4, 12))
+        top.columnconfigure(1, weight=1)
 
-        ttk.Label(left, text="Instances", style="Big.TLabel").pack(anchor="w")
-        ttk.Label(
-            left, text="Your isolated Minecraft setups", style="MutedCard.TLabel"
-        ).pack(anchor="w", pady=(2, 10))
+        greeting = tk.Frame(top, bg=BG)
+        greeting.grid(row=0, column=0, sticky="w")
+        tk.Label(
+            greeting, text="Greetings!", bg=BG, fg=FG,
+            font=("Segoe UI", 18, "bold")
+        ).pack(anchor="w")
+        tk.Label(
+            greeting, text="Choose a Minecraft instance to play.",
+            bg=BG, fg=MUTED, font=("Segoe UI", 9)
+        ).pack(anchor="w", pady=(2, 0))
 
-        self.ilist = tk.Listbox(
-            left, width=29, height=18, bg=FIELD, fg=FG, relief="flat",
-            highlightthickness=0, selectbackground=ACCENT2,
-            selectforeground="#ffffff", font=("Segoe UI", 10)
+        controls = tk.Frame(top, bg=BG)
+        controls.grid(row=0, column=1, sticky="e")
+        ttk.Button(controls, text="Import", command=self.import_inst).pack(side="left", padx=3)
+        ttk.Button(controls, text="Import Client", command=self.import_client_dialog).pack(side="left", padx=3)
+        ttk.Button(controls, text="Export", command=self.export_inst).pack(side="left", padx=3)
+        ttk.Button(controls, text="Delete", command=self.del_inst).pack(side="left", padx=3)
+
+        body = tk.Frame(tab, bg=BG)
+        body.grid(row=1, column=0, sticky="nsew")
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(0, weight=1)
+
+        self.instance_canvas = tk.Canvas(
+            body, bg=BG, highlightthickness=0, bd=0
         )
-        self.ilist.pack(fill="both", expand=True)
-        self.ilist.bind("<<ListboxSelect>>", self._sel_ev)
+        self.instance_scroll = ttk.Scrollbar(
+            body, orient="vertical", command=self.instance_canvas.yview
+        )
+        self.instance_grid = tk.Frame(self.instance_canvas, bg=BG)
 
-        actions = ttk.Frame(left, style="Card.TFrame")
-        actions.pack(fill="x", pady=(10, 0))
-        for i, (label, cmd) in enumerate([
-            ("Import", self.import_inst),
-            ("Client…", self.import_client_dialog), ("Export", self.export_inst),
-            ("Shortcut", self.make_shortcut), ("Delete", self.del_inst),
-        ]):
-            ttk.Button(actions, text=label, command=cmd).grid(
-                row=i // 2, column=i % 2, sticky="ew", padx=2, pady=2
+        self.instance_grid.bind(
+            "<Configure>",
+            lambda _e: self.instance_canvas.configure(
+                scrollregion=self.instance_canvas.bbox("all")
             )
-        actions.columnconfigure(0, weight=1)
-        actions.columnconfigure(1, weight=1)
+        )
+        self.instance_canvas.create_window(
+            (0, 0), window=self.instance_grid, anchor="nw", width=1
+        )
+        self.instance_canvas.configure(yscrollcommand=self.instance_scroll.set)
+        self.instance_canvas.grid(row=0, column=0, sticky="nsew")
+        self.instance_scroll.grid(row=0, column=1, sticky="ns")
 
-        right = ttk.Frame(tab, style="Card.TFrame", padding=18)
-        right.grid(row=0, column=1, sticky="nsew")
-        right.columnconfigure(0, weight=1)
+        self.instance_canvas.bind(
+            "<Configure>",
+            lambda e: self.instance_canvas.itemconfigure(
+                self.instance_canvas.find_withtag("all")[0], width=e.width
+            )
+        )
 
-        self.i_title = ttk.Label(right, text="Select an instance", style="Big.TLabel")
+        bottom = tk.Frame(tab, bg=BG)
+        bottom.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        bottom.columnconfigure(0, weight=1)
+
+        self.i_title = tk.Label(
+            bottom, text="Select an instance", bg=BG, fg=FG,
+            font=("Segoe UI", 12, "bold"), anchor="w"
+        )
         self.i_title.grid(row=0, column=0, sticky="w")
-
-        self.i_info = ttk.Label(
-            right, text="Create or select an instance to get started.",
-            style="MutedCard.TLabel", justify="left"
+        self.i_info = tk.Label(
+            bottom, text="Your Minecraft instances will appear above.",
+            bg=BG, fg=MUTED, font=("Segoe UI", 9), anchor="w"
         )
-        self.i_info.grid(row=1, column=0, sticky="w", pady=(4, 14))
-
-        settings = ttk.Frame(right, style="Card.TFrame")
-        settings.grid(row=2, column=0, sticky="ew")
-        settings.columnconfigure(5, weight=1)
-
-        ttk.Label(settings, text="Username", style="MutedCard.TLabel").grid(
-            row=0, column=0, padx=(0, 5)
-        )
-        ttk.Entry(settings, textvariable=self._uname, width=13).grid(
-            row=0, column=1, padx=(0, 14)
-        )
-        ttk.Label(settings, text="RAM", style="MutedCard.TLabel").grid(
-            row=0, column=2, padx=(0, 5)
-        )
-        ttk.Combobox(
-            settings, textvariable=self._ram,
-            values=["2G", "4G", "6G", "8G", "12G", "16G"],
-            width=6, state="readonly"
-        ).grid(row=0, column=3, padx=(0, 14))
-        ttk.Checkbutton(
-            settings, text="Use OptiFine", variable=self._optifine,
-            command=self._save_optifine_setting
-        ).grid(row=0, column=4, padx=(0, 8))
-        ttk.Button(
-            settings, text="Install OptiFine…", command=self.install_optifine
-        ).grid(row=0, column=5, sticky="w")
+        self.i_info.grid(row=1, column=0, sticky="w", pady=(2, 0))
 
         self.play_btn = ttk.Button(
-            right, text="▶  PLAY", style="Play.TButton",
+            bottom, text="▶  PLAY", style="Play.TButton",
             command=self.play, state="disabled"
         )
-        self.play_btn.grid(row=3, column=0, sticky="ew", pady=(20, 8))
+        self.play_btn.grid(row=0, column=1, rowspan=2, sticky="e", padx=(15, 0))
 
-        ttk.Label(
-            right,
-            text=(
-                "Use the Install tab to add Fabric, NeoForge, or Forge to an "
-                "instance. Use Modrinth to browse compatible mods, shaders, "
-                "and resource packs."
-            ),
-            style="MutedCard.TLabel", wraplength=600
-        ).grid(row=4, column=0, sticky="w", pady=(0, 10))
-
+        options = ttk.Frame(bottom)
+        options.grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(options, text="Username", style="Muted.TLabel").pack(side="left")
+        ttk.Entry(options, textvariable=self._uname, width=12).pack(side="left", padx=(6, 14))
+        ttk.Label(options, text="RAM", style="Muted.TLabel").pack(side="left")
+        ttk.Combobox(
+            options, textvariable=self._ram,
+            values=["2G", "4G", "6G", "8G", "12G", "16G"],
+            width=5, state="readonly"
+        ).pack(side="left", padx=(6, 14))
+        ttk.Checkbutton(
+            options, text="OptiFine", variable=self._optifine,
+            command=self._save_optifine_setting
+        ).pack(side="left")
         ttk.Button(
-            right, text="＋ Add mods / packs / shaders from files…",
-            command=self.add_file
-        ).grid(row=5, column=0, sticky="w")
+            options, text="Install OptiFine…",
+            command=self.install_optifine
+        ).pack(side="left", padx=(8, 0))
+
+        self._empty_instances = tk.Label(
+            self.instance_grid,
+            text="No instances yet.\nCreate one from the Install tab.",
+            bg=BG, fg=MUTED, font=("Segoe UI", 11),
+            justify="center"
+        )
+
+    def _instance_palette(self, name):
+        palettes = [
+            ("#173f2b", "#2de574", "#0c2418"),
+            ("#253d54", "#63b3ed", "#111d2b"),
+            ("#463221", "#f0b35a", "#24180e"),
+            ("#3d2449", "#d88cff", "#21142a"),
+            ("#263e39", "#6ee7c8", "#101e1b"),
+            ("#3e2b38", "#f08ba9", "#21151c"),
+        ]
+        return palettes[abs(hash(name)) % len(palettes)]
+
+    def _instance_card(self, name, index):
+        cfg = instances.load_cfg(name)
+        version = str(cfg.get("version", "?"))
+        loader = str(cfg.get("loader") or "vanilla").title()
+        mods = self._count_mods(name)
+        c1, c2, c3 = self._instance_palette(name)
+
+        card = tk.Frame(
+            self.instance_grid, bg="#0e1712",
+            highlightthickness=1, highlightbackground="#17261d",
+            width=205, height=285
+        )
+        card.grid(
+            row=index // 4, column=index % 4,
+            padx=8, pady=8, sticky="nsew"
+        )
+        card.grid_propagate(False)
+
+        art = tk.Canvas(card, width=203, height=185, bg=c1, highlightthickness=0, bd=0)
+        art.pack(fill="x")
+
+        # Lightweight generated artwork: sky, horizon, sun and terrain.
+        art.create_rectangle(0, 0, 203, 120, fill=c1, outline="")
+        art.create_oval(145, 18, 181, 54, fill=c2, outline="")
+        art.create_polygon(
+            0, 120, 45, 76, 78, 118, 112, 70, 165, 120,
+            203, 82, 203, 185, 0, 185, fill=c3, outline=""
+        )
+        art.create_rectangle(0, 145, 203, 185, fill="#0a130e", outline="")
+        art.create_text(
+            12, 15, text=loader.upper(), anchor="nw",
+            fill="#d9ffe5", font=("Segoe UI", 8, "bold")
+        )
+
+        info = tk.Frame(card, bg="#0e1712")
+        info.pack(fill="both", expand=True, padx=12, pady=(8, 5))
+
+        tk.Label(
+            info, text=name, bg="#0e1712", fg=FG,
+            font=("Segoe UI", 11, "bold"), anchor="w"
+        ).pack(fill="x")
+
+        tk.Label(
+            info,
+            text="◈ " + version + "    ◇ " + loader,
+            bg="#0e1712", fg=MUTED,
+            font=("Segoe UI", 8), anchor="w"
+        ).pack(fill="x", pady=(2, 1))
+
+        tk.Label(
+            info,
+            text=str(mods) + " mods",
+            bg="#0e1712", fg=MUTED,
+            font=("Segoe UI", 8), anchor="w"
+        ).pack(fill="x")
+
+        btn = tk.Button(
+            info, text="PLAY",
+            bg=GREEN_DARK, fg=ACCENT, activebackground=GREEN_MID,
+            activeforeground="#ffffff", relief="flat", bd=0,
+            font=("Segoe UI", 8, "bold"), cursor="hand2",
+            command=lambda n=name: self._quick_play(n)
+        )
+        btn.pack(fill="x", pady=(5, 0), ipady=4)
+
+        def select(_event=None, n=name):
+            self._select_instance(n)
+
+        def enter(_event=None):
+            card.configure(highlightbackground=GREEN_MID)
+            btn.configure(bg="#14552e")
+
+        def leave(_event=None):
+            card.configure(highlightbackground="#17261d")
+            btn.configure(bg=GREEN_DARK)
+
+        for widget in (card, art, info):
+            widget.bind("<Button-1>", select)
+            widget.bind("<Enter>", enter)
+            widget.bind("<Leave>", leave)
+        for widget in info.winfo_children():
+            widget.bind("<Button-1>", select)
+            widget.bind("<Enter>", enter)
+            widget.bind("<Leave>", leave)
+
+    def _quick_play(self, name):
+        self._select_instance(name)
+        self.play()
 
     def _build_loader_tab(self):
         tab = self.loader_tab
@@ -618,26 +732,79 @@ class App:
             self.modrinth_target.set("")
 
     def _refresh_list(self):
-        self.ilist.delete(0, "end")
-        for name in instances.list_instances():
-            self.ilist.insert("end", name)
+        for child in self.instance_grid.winfo_children():
+            child.destroy()
+
+        names = instances.list_instances()
+        if not names:
+            self._empty_instances = tk.Label(
+                self.instance_grid,
+                text="No instances yet.\nCreate one from the Install tab.",
+                bg=BG, fg=MUTED, font=("Segoe UI", 11),
+                justify="center"
+            )
+            self._empty_instances.grid(row=0, column=0, columnspan=4, pady=90)
+        else:
+            for i, name in enumerate(names):
+                try:
+                    self._instance_card(name, i)
+                except Exception as e:
+                    self.log_message("Could not display instance " + name + ": " + str(e))
+
+        for col in range(4):
+            self.instance_grid.columnconfigure(col, weight=1)
+
         self.sel = None
         self.version = None
         self.loader = None
         self._optifine.set(False)
         self.play_btn.config(state="disabled")
+        self.i_title.config(text="Select an instance")
+        self.i_info.config(text="Your Minecraft instances will appear above.")
         self._refresh_loader_instances()
         self._refresh_modrinth_targets()
 
     def _select_instance(self, name):
-        names = list(self.ilist.get(0, "end"))
-        if name in names:
-            idx = names.index(name)
-            self.ilist.selection_clear(0, "end")
-            self.ilist.selection_set(idx)
-            self.ilist.activate(idx)
-            self.ilist.see(idx)
-            self._sel_ev()
+        if name not in instances.list_instances():
+            return
+        self.sel = name
+        self._sel_ev_name(name)
+
+    def _sel_ev_name(self, name):
+        try:
+            cfg = instances.load_cfg(name)
+            instances.use(name, core)
+        except Exception as e:
+            messagebox.showerror("BlemmLauncher", str(e))
+            return
+
+        self.sel = name
+        self.version = cfg.get("version")
+        self.loader = cfg.get("loader")
+        self._uname.set(cfg.get("username", "Blemm"))
+        self._ram.set(cfg.get("ram", "4G"))
+        self._optifine.set(bool(cfg.get("optifine", False)))
+
+        self.i_title.config(text=name)
+        self.i_info.config(
+            text=(
+                "Minecraft " + str(self.version) + "  •  "
+                + (self.loader or "vanilla") + "  •  "
+                + str(cfg.get("ram", "4G")) + " RAM  •  "
+                + str(self._count_mods(name)) + " mods"
+            )
+        )
+        self.play_btn.config(state="normal")
+        self._refresh_loader_instances()
+        self._refresh_modrinth_targets()
+
+    def _sel_ev(self, _=None):
+        selection = getattr(self, "ilist", None)
+        if selection is None:
+            return
+        picked = selection.curselection()
+        if picked:
+            self._sel_ev_name(selection.get(picked[0]))
 
     def _sel_ev(self, _=None):
         selection = self.ilist.curselection()
