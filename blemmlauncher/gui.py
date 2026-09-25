@@ -148,34 +148,242 @@ class App:
         threading.Thread(target=self._load_versions, daemon=True).start()
 
     def _build_header(self):
-        head = ttk.Frame(self.root)
-        head.pack(fill="x", padx=18, pady=(14, 8))
-        ttk.Label(head, text="◈ BlemmLauncher", style="Title.TLabel").pack(side="left")
-        ttk.Label(
-            head, text="  Minecraft, simplified.", style="Accent.TLabel"
-        ).pack(side="left", pady=(7, 0))
+        head = tk.Frame(self.root, bg=BG, height=58)
+        head.pack(fill="x", padx=12, pady=(10, 4))
+        head.pack_propagate(False)
+
+        self.menu_button = tk.Button(
+            head, text="☰", bg=BG, fg=FG,
+            activebackground=BG, activeforeground=ACCENT,
+            relief="flat", bd=0, highlightthickness=0,
+            font=("Segoe UI Symbol", 19), cursor="hand2",
+            command=self.toggle_navigation
+        )
+        self.menu_button.pack(side="left", padx=(2, 10))
+
+        title_box = tk.Frame(head, bg=BG)
+        title_box.pack(side="left", fill="y")
+        tk.Label(
+            title_box, text="BlemmLauncher", bg=BG, fg=FG,
+            font=("Segoe UI", 19, "bold")
+        ).pack(anchor="w", pady=(2, 0))
+        tk.Label(
+            title_box, text="Minecraft, simplified.", bg=BG, fg=ACCENT,
+            font=("Segoe UI", 9, "bold")
+        ).pack(anchor="w")
+
+        self.current_page = tk.Label(
+            head, text="Play", bg=BG, fg=MUTED,
+            font=("Segoe UI", 9)
+        )
+        self.current_page.pack(side="right", padx=8, pady=(8, 0))
 
     def _build_tabs(self):
-        self.tabs = ttk.Notebook(self.root)
-        self.tabs.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+        # The old top Notebook is intentionally gone. Navigation lives in a
+        # hidden slide-out drawer opened by the three-line menu button.
+        self.content_area = tk.Frame(self.root, bg=BG)
+        self.content_area.pack(fill="both", expand=True, padx=14, pady=(0, 8))
 
-        self.play_tab = ttk.Frame(self.tabs)
-        self.loader_tab = ttk.Frame(self.tabs)
-        self.modrinth_tab = ttk.Frame(self.tabs)
-        self.server_tab = ttk.Frame(self.tabs)
-        self.log_tab = ttk.Frame(self.tabs)
+        self.play_tab = tk.Frame(self.content_area, bg=BG)
+        self.loader_tab = tk.Frame(self.content_area, bg=BG)
+        self.modrinth_tab = tk.Frame(self.content_area, bg=BG)
+        self.server_tab = tk.Frame(self.content_area, bg=BG)
+        self.log_tab = tk.Frame(self.content_area, bg=BG)
 
-        self.tabs.add(self.play_tab, text="  Play  ")
-        self.tabs.add(self.loader_tab, text="  Install  ")
-        self.tabs.add(self.modrinth_tab, text="  Modrinth  ")
-        self.tabs.add(self.server_tab, text="  Server  ")
-        self.tabs.add(self.log_tab, text="  Logs  ")
+        self.pages = {
+            "Play": self.play_tab,
+            "Install": self.loader_tab,
+            "Modrinth": self.modrinth_tab,
+            "Server": self.server_tab,
+            "Logs": self.log_tab,
+        }
+
+        for page in self.pages.values():
+            page.place(relx=0, rely=0, relwidth=1, relheight=1)
 
         self._build_play_tab()
         self._build_loader_tab()
         self._build_modrinth_tab()
         self._build_server_tab()
         self._build_log_tab()
+
+        self._build_navigation()
+        self.show_page("Play")
+
+    def _build_navigation(self):
+        self.drawer_width = 245
+        self.drawer_open = False
+
+        self.drawer = tk.Frame(
+            self.root, bg="#0a1510",
+            highlightthickness=1, highlightbackground="#173522"
+        )
+        self.drawer.place(
+            x=-self.drawer_width, y=0,
+            width=self.drawer_width, relheight=1
+        )
+
+        top = tk.Frame(self.drawer, bg="#0a1510")
+        top.pack(fill="x", padx=16, pady=(18, 12))
+
+        tk.Label(
+            top, text="MENU", bg="#0a1510", fg=ACCENT,
+            font=("Segoe UI", 9, "bold")
+        ).pack(side="left")
+
+        tk.Button(
+            top, text="×", bg="#0a1510", fg=MUTED,
+            activebackground="#0a1510", activeforeground=FG,
+            relief="flat", bd=0, font=("Segoe UI", 17),
+            cursor="hand2", command=self.close_navigation
+        ).pack(side="right")
+
+        tk.Label(
+            self.drawer, text="Navigate", bg="#0a1510", fg=MUTED,
+            font=("Segoe UI", 9)
+        ).pack(anchor="w", padx=18, pady=(2, 10))
+
+        for name, icon in [
+            ("Play", "⌂"),
+            ("Install", "+"),
+            ("Modrinth", "◇"),
+            ("Server", "▣"),
+            ("Logs", "≡"),
+        ]:
+            self._nav_button(name, icon)
+
+        tk.Frame(self.drawer, bg="#173522", height=1).pack(
+            fill="x", padx=18, pady=(18, 12)
+        )
+        tk.Label(
+            self.drawer, text="BlemmLauncher",
+            bg="#0a1510", fg="#507360",
+            font=("Segoe UI", 8)
+        ).pack(anchor="w", padx=18)
+
+    def _nav_button(self, name, icon):
+        wrap = tk.Frame(self.drawer, bg="#0a1510")
+        wrap.pack(fill="x", padx=12, pady=3)
+
+        canvas = tk.Canvas(
+            wrap, width=215, height=44,
+            bg="#0a1510", highlightthickness=0, bd=0
+        )
+        canvas.pack(fill="x")
+
+        def draw(active=False, hover=False):
+            canvas.delete("all")
+            if active:
+                fill = GREEN_DARK
+                outline = GREEN_MID
+            elif hover:
+                fill = "#112c1c"
+                outline = "#1c5a35"
+            else:
+                fill = "#0d1e14"
+                outline = "#142a1d"
+
+            canvas.create_rounded_rectangle if False else None
+            # Rounded pill using overlapping rectangles + circles.
+            x1, y1, x2, y2, r = 2, 2, 213, 42, 14
+            canvas.create_rectangle(x1+r, y1, x2-r, y2, fill=fill, outline="")
+            canvas.create_rectangle(x1, y1+r, x2, y2-r, fill=fill, outline="")
+            canvas.create_oval(x1, y1, x1+2*r, y1+2*r, fill=fill, outline="")
+            canvas.create_oval(x2-2*r, y1, x2, y1+2*r, fill=fill, outline="")
+            canvas.create_oval(x1, y2-2*r, x1+2*r, y2, fill=fill, outline="")
+            canvas.create_oval(x2-2*r, y2-2*r, x2, y2, fill=fill, outline="")
+            if active:
+                canvas.create_rectangle(2, 11, 5, 33, fill=ACCENT, outline="")
+            canvas.create_text(
+                27, 22, text=icon, fill=ACCENT if active else MUTED,
+                font=("Segoe UI Symbol", 12, "bold")
+            )
+            canvas.create_text(
+                51, 22, text=name, anchor="w",
+                fill=FG if active else "#b5c6bb",
+                font=("Segoe UI", 10, "bold")
+            )
+
+        draw(False, False)
+
+        canvas.bind("<Enter>", lambda _e: draw(name == getattr(self, "_page_name", ""), True))
+        canvas.bind("<Leave>", lambda _e: draw(name == getattr(self, "_page_name", ""), False))
+        canvas.bind("<Button-1>", lambda _e, n=name: self.show_page(n))
+
+        setattr(self, "_nav_" + name.lower(), canvas)
+
+    def show_page(self, name):
+        page = self.pages.get(name)
+        if page is None:
+            return
+        page.lift()
+        self._page_name = name
+        self.current_page.config(text=name)
+        self._refresh_nav_buttons()
+        self.close_navigation()
+
+    def _refresh_nav_buttons(self):
+        for name in self.pages:
+            canvas = getattr(self, "_nav_" + name.lower(), None)
+            if canvas is None:
+                continue
+            active = name == getattr(self, "_page_name", "")
+            canvas.event_generate("<Leave>")
+            # Redraw through the same event path by invoking a lightweight
+            # click/hover-neutral repaint.
+            canvas.delete("all")
+            fill = GREEN_DARK if active else "#0d1e14"
+            x1, y1, x2, y2, r = 2, 2, 213, 42, 14
+            for args in [
+                (x1+r, y1, x2-r, y2),
+                (x1, y1+r, x2, y2-r),
+            ]:
+                canvas.create_rectangle(*args, fill=fill, outline="")
+            canvas.create_oval(x1, y1, x1+2*r, y1+2*r, fill=fill, outline="")
+            canvas.create_oval(x2-2*r, y1, x2, y1+2*r, fill=fill, outline="")
+            canvas.create_oval(x1, y2-2*r, x1+2*r, y2, fill=fill, outline="")
+            canvas.create_oval(x2-2*r, y2-2*r, x2, y2, fill=fill, outline="")
+            if active:
+                canvas.create_rectangle(2, 11, 5, 33, fill=ACCENT, outline="")
+            icons = {"Play": "⌂", "Install": "+", "Modrinth": "◇", "Server": "▣", "Logs": "≡"}
+            canvas.create_text(
+                27, 22, text=icons[name],
+                fill=ACCENT if active else MUTED,
+                font=("Segoe UI Symbol", 12, "bold")
+            )
+            canvas.create_text(
+                51, 22, text=name, anchor="w",
+                fill=FG if active else "#b5c6bb",
+                font=("Segoe UI", 10, "bold")
+            )
+
+    def toggle_navigation(self):
+        if self.drawer_open:
+            self.close_navigation()
+        else:
+            self.open_navigation()
+
+    def open_navigation(self):
+        if self.drawer_open:
+            return
+        self.drawer_open = True
+        self._animate_drawer(-self.drawer_width, 0)
+
+    def close_navigation(self):
+        if not getattr(self, "drawer_open", False):
+            return
+        self.drawer_open = False
+        self._animate_drawer(0, -self.drawer_width)
+
+    def _animate_drawer(self, start, end, step=0):
+        distance = end - start
+        steps = 10
+        if step >= steps:
+            self.drawer.place_configure(x=end)
+            return
+        x = start + int(distance * ((step + 1) / steps))
+        self.drawer.place_configure(x=x)
+        self.root.after(12, lambda: self._animate_drawer(start, end, step + 1))
 
     def _build_status(self):
         box = ttk.Frame(self.root)
