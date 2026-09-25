@@ -110,7 +110,7 @@ class OwnerServerManager:
         controls.pack(fill="x", padx=16, pady=(0, 8))
         self._button(controls, "Create Server", self.create_server, True).pack(side="left")
         self._button(controls, "Refresh", self.refresh_servers).pack(side="left", padx=6)
-        for label, action in (("Start","start"),("Stop","stop"),("Restart","restart"),("Console → File","logs")):
+        for label, action in (("Start","start"),("Stop","stop"),("Restart","restart"),("Console","logs")):
             self._button(controls, label, lambda a=action: self.server_action(a)).pack(side="left", padx=3)
         self._button(controls, "Delete Server", self.delete_server, danger=True).pack(side="right")
 
@@ -136,15 +136,46 @@ class OwnerServerManager:
 
         right = tk.Frame(body, bg=CARD)
         right.pack(side="left", fill="both", expand=True, padx=(10,0))
-        top = tk.Frame(right, bg=CARD)
-        top.pack(fill="x", padx=10, pady=10)
-        tk.Label(top, text="File", bg=CARD, fg=MUTED).pack(side="left")
-        tk.Entry(top, textvariable=self.file_var, bg=FIELD, fg=FG,
+
+        tabs = ttk.Notebook(right)
+        tabs.pack(fill="both", expand=True, padx=6, pady=6)
+        console_tab = tk.Frame(tabs, bg=CARD)
+        file_tab = tk.Frame(tabs, bg=CARD)
+        tabs.add(console_tab, text="Console")
+        tabs.add(file_tab, text="Edit Files")
+
+        console_top = tk.Frame(console_tab, bg=CARD)
+        console_top.pack(fill="x", padx=10, pady=(10, 6))
+        tk.Label(console_top, text="Live Console", bg=CARD, fg=FG,
+                 font=("Segoe UI", 11, "bold")).pack(side="left")
+        self.console_status = tk.Label(console_top, text="Select a server.",
+                                       bg=CARD, fg=MUTED)
+        self.console_status.pack(side="right")
+        self.console = scrolledtext.ScrolledText(
+            console_tab, bg="#07170d", fg="#8CFFB1", insertbackground=ACCENT,
+            relief="flat", bd=0, wrap="none", font=("Consolas", 9), state="disabled"
+        )
+        self.console.pack(fill="both", expand=True, padx=10, pady=(0, 7))
+        command_row = tk.Frame(console_tab, bg=CARD)
+        command_row.pack(fill="x", padx=10, pady=(0, 10))
+        tk.Label(command_row, text=">", bg=CARD, fg=ACCENT,
+                 font=("Consolas", 10, "bold")).pack(side="left", padx=(0, 6))
+        self.console_command = tk.Entry(command_row, bg=FIELD, fg=FG,
+                                         insertbackground=FG, relief="flat",
+                                         font=("Consolas", 9))
+        self.console_command.pack(side="left", fill="x", expand=True, ipady=6)
+        self.console_command.bind("<Return>", lambda _e: self.send_console_command())
+        self._button(command_row, "Send", self.send_console_command, True).pack(side="left", padx=(7, 0))
+
+        file_top = tk.Frame(file_tab, bg=CARD)
+        file_top.pack(fill="x", padx=10, pady=10)
+        tk.Label(file_top, text="File", bg=CARD, fg=MUTED).pack(side="left")
+        tk.Entry(file_top, textvariable=self.file_var, bg=FIELD, fg=FG,
                  insertbackground=FG, relief="flat").pack(side="left", fill="x", expand=True, padx=7, ipady=6)
-        self._button(top, "Load", self.load_file).pack(side="left")
-        self._button(top, "Save", self.save_file, True).pack(side="left", padx=5)
+        self._button(file_top, "Load", self.load_file).pack(side="left")
+        self._button(file_top, "Save", self.save_file, True).pack(side="left", padx=5)
         self.editor = scrolledtext.ScrolledText(
-            right, bg="#07170d", fg="#8CFFB1", insertbackground=ACCENT,
+            file_tab, bg="#07170d", fg="#8CFFB1", insertbackground=ACCENT,
             relief="flat", bd=0, wrap="none", font=("Consolas", 9)
         )
         self.editor.pack(fill="both", expand=True, padx=10, pady=(0,10))
@@ -179,6 +210,12 @@ class OwnerServerManager:
                         result = {"server": name, "running": True}
                     elif action == "logs":
                         result = {"server": name, "lines": server.get_logs(name)}
+                    elif action == "command":
+                        command = str(payload.get("command", "")).strip()
+                        if not command:
+                            raise RuntimeError("Console command is empty.")
+                        server.command(name, command)
+                        result = {"server": name, "command": command, "sent": True}
                     elif action == "create_server":
                         result = server.create(name, str(payload.get("type", "paper")).strip().lower(), str(payload.get("version", "")).strip(), ram=str(payload.get("ram", "4G")).strip() or "4G", allow_reserved=True)
                     elif action == "files":
@@ -364,16 +401,42 @@ class OwnerServerManager:
                 self.refresh_servers()
             elif action == "logs":
                 lines = (result or {}).get("lines", [])
-                # Console is presented inside the normal file editor rather
-                # than opening a separate console window.
-                self.editor.config(state="normal")
-                self.editor.delete("1.0", "end")
-                self.editor.insert("1.0", "\n".join(str(x.get("line", "")) for x in lines))
-                self.editor.config(state="disabled")
-                self.file_var.set("[Console Output — read-only]")
-                self.status.set("Console output loaded into the file editor.")
+                self.console.config(state="normal")
+                self.console.delete("1.0", "end")
+                self.console.insert("1.0", "\n".join(str(x.get("line", "")) for x in lines))
+                self.console.see("end")
+                self.console.config(state="disabled")
+                self.console_status.config(text="Live • " + str(self.server_var.get()))
+                self.status.set("Console updated.")
                 self._schedule_console_refresh()
+            elif action == "command":
+                command = str((result or {}).get("command", "")).strip()
+                self.console_command.delete(0, "end")
+                self.console_status.config(text="Sent • " + command)
+                self.status.set("Command sent.")
+                self.win.after(350, lambda: self.server_action("logs"))
         self.call(action, {"server": name}, done)
+
+    def send_console_command(self):
+        name = self.server_var.get().strip()
+        command = self.console_command.get().strip()
+        if not name:
+            self._show_error("Select a Minecraft server first.")
+            return
+        if not command:
+            return
+        self.status.set("Sending command…")
+        self.call("command", {"server": name, "command": command}, self._console_command_done)
+
+    def _console_command_done(self, result, error):
+        if error:
+            self._show_error(error)
+            return
+        command = str((result or {}).get("command", "")).strip()
+        self.console_command.delete(0, "end")
+        self.console_status.config(text="Sent • " + command)
+        self.status.set("Command sent.")
+        self.win.after(350, lambda: self.server_action("logs"))
 
     def _schedule_console_refresh(self):
         if not self.win.winfo_exists():
