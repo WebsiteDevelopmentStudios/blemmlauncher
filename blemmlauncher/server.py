@@ -486,8 +486,8 @@ def _neoforge_server(d, version, java):
             os.remove(installer_path)
 
 
-def create(name, kind, version, ram="4G", java=None):
-    if is_reserved_name(name):
+def create(name, kind, version, ram="4G", java=None, allow_reserved=False):
+    if is_reserved_name(name) and not allow_reserved:
         raise RuntimeError("That server name is used by the devs.")
     if not safe_name(name):
         raise RuntimeError("Invalid server name.")
