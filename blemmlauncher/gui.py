@@ -134,8 +134,13 @@ class App:
         self.root = root
         root.title("BlemmLauncher")
         root.geometry("1050x720")
-        root.minsize(900, 620)
+        root.minsize(760, 480)
         style_dark(root)
+        # Keep the complete launcher usable in a normal, non-maximized window.
+        # Tk scaling is adjusted as the window gets smaller so dense pages do
+        # not immediately run below the visible viewport.
+        self._ui_scale = 1.0
+        root.bind("<Configure>", self._responsive_scale)
 
         self.q = queue.Queue()
         self.sel = None
@@ -178,6 +183,20 @@ class App:
         self._refresh_list()
         self._animate_status()
         threading.Thread(target=self._load_versions, daemon=True).start()
+
+    def _responsive_scale(self, event=None):
+        if event is not None and getattr(event, "widget", None) is not self.root:
+            return
+        try:
+            width = max(1, self.root.winfo_width())
+            height = max(1, self.root.winfo_height())
+            target = min(1.0, max(0.78, min(width / 1050.0, height / 720.0)))
+            if abs(target - self._ui_scale) < 0.035:
+                return
+            self._ui_scale = target
+            self.root.tk.call("tk", "scaling", target)
+        except Exception:
+            pass
 
     def _build_header(self):
         head = tk.Frame(self.root, bg=BG, height=58)
