@@ -17,6 +17,7 @@
 const encoder = new TextEncoder();
 const PBKDF2_ITERATIONS = 100000;
 const TOKEN_TTL_SECONDS = 3600;
+const OWNER_AGENT_NAME_PREFIX = "Owner PC";
 
 function b64url(bytes) {
   let binary = "";
@@ -201,9 +202,12 @@ async function ensureAgentTables(env) {
   if (!env.DB) return;
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS agent_pairings (code TEXT PRIMARY KEY, created_by TEXT NOT NULL, expires_at INTEGER NOT NULL)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'offline', last_seen INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS agent_commands (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, action TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending', result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
-  ]);
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agents (id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'offline', last_seen INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, owner_username TEXT)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agent_commands (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, action TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'pending', result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+    env.DB.prepare("ALTER TABLE agents ADD COLUMN owner_username TEXT").bind()
+  ]).catch(async () => {
+    // Existing installations may already have the column; ignore that migration error.
+  });
 }
 
 async function requireDeveloper(request, env) {
@@ -432,13 +436,62 @@ f.addEventListener("submit", async e => {
       return json({ paired: true, agent_id: agentId, agent_token: agentToken, name });
     }
 
+    if (request.method === "POST" && url.pathname === "/agents/owner/register") {
+      const identity = await requireOwner(request, env);
+      if (!identity) return json({ error: "Owner authorization required." }, 403);
+      await ensureAgentTables(env);
+
+      const body = await parseJson(request);
+      const suppliedName = typeof body?.name === "string" ? body.name.trim() : "";
+      const name = suppliedName
+        ? suppliedName.slice(0, 64)
+        : OWNER_AGENT_NAME_PREFIX + " • " + identity.username;
+
+      // The owner PC uses a persistent agent credential. Re-registering
+      // rotates the credential, which safely disconnects any older copy.
+      const existing = await env.DB.prepare(
+        "SELECT id FROM agents WHERE owner_username = ? LIMIT 1"
+      ).bind(identity.username).first();
+
+      const agentId = existing?.id || randomToken(12);
+      const agentToken = randomToken(32);
+      const tokenHash = await sha256Hex(agentToken);
+      const now = Math.floor(Date.now() / 1000);
+
+      if (existing) {
+        await env.DB.prepare(
+          "UPDATE agents SET name = ?, token_hash = ?, status = 'online', last_seen = ?, owner_username = ? WHERE id = ?"
+        ).bind(name, tokenHash, now, identity.username, agentId).run();
+        await env.DB.prepare(
+          "DELETE FROM agent_commands WHERE agent_id = ? AND status IN ('pending','dispatched')"
+        ).bind(agentId).run();
+      } else {
+        await env.DB.prepare(
+          "INSERT INTO agents (id, name, token_hash, status, last_seen, owner_username) VALUES (?, ?, ?, 'online', ?, ?)"
+        ).bind(agentId, name, tokenHash, now, identity.username).run();
+      }
+
+      return json({
+        connected: true,
+        persistent: true,
+        agent_id: agentId,
+        agent_token: agentToken,
+        name,
+        owner: identity.username
+      });
+    }
+
     if (request.method === "GET" && url.pathname === "/agents") {
       const identity = await requireDeveloper(request, env);
       if (!identity) return json({ error: "Developer authorization required." }, 401);
       await ensureAgentTables(env);
-      const result = await env.DB.prepare(
-        "SELECT id, name, status, last_seen, created_at FROM agents ORDER BY name COLLATE NOCASE"
-      ).all();
+      const result = identity.role === "owner"
+        ? await env.DB.prepare(
+            "SELECT id, name, status, last_seen, created_at, owner_username FROM agents ORDER BY name COLLATE NOCASE"
+          ).all()
+        : await env.DB.prepare(
+            "SELECT id, name, status, last_seen, created_at, owner_username FROM agents WHERE owner_username IS NULL ORDER BY name COLLATE NOCASE"
+          ).all();
       const now = Math.floor(Date.now() / 1000);
       const agents = (result.results || []).map(a => ({
         ...a,
@@ -453,8 +506,13 @@ f.addEventListener("submit", async e => {
       if (!identity) return json({ error: "Developer authorization required." }, 401);
       await ensureAgentTables(env);
       const agentId = decodeURIComponent(agentCommandMatch[1]);
-      const agent = await env.DB.prepare("SELECT id FROM agents WHERE id = ? LIMIT 1").bind(agentId).first();
+      const agent = await env.DB.prepare(
+        "SELECT id, owner_username FROM agents WHERE id = ? LIMIT 1"
+      ).bind(agentId).first();
       if (!agent) return json({ error: "Agent not found." }, 404);
+      if (agent.owner_username && identity.role !== "owner") {
+        return json({ error: "That server PC is owner-only." }, 403);
+      }
       const body = await parseJson(request);
       const action = typeof body?.action === "string" ? body.action.trim() : "";
       const payload = body?.payload && typeof body.payload === "object" ? body.payload : {};
