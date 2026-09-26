@@ -2,7 +2,7 @@ import json
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog, scrolledtext
+from tkinter import ttk, messagebox, simpledialog, scrolledtext, filedialog
 
 from Dev import auth as dev_auth
 from . import server, core
@@ -131,7 +131,7 @@ class OwnerServerManager:
         row.pack(fill="x", padx=8, pady=8)
         for label, fn in (("Open",self.open_selected),("Up",self.go_up),
                           ("New File",self.new_file),("New Folder",self.new_folder),
-                          ("Rename",self.rename),("Delete",self.delete_file)):
+                          ("Import",self.import_file),("Rename",self.rename),("Delete",self.delete_file)):
             self._button(row, label, fn).pack(side="left", padx=2)
 
         right = tk.Frame(body, bg=CARD)
@@ -231,6 +231,12 @@ class OwnerServerManager:
                             raise RuntimeError("Remote editor writes are limited to 5 MB.")
                         server.write_file(name, rel, content)
                         result = {"server": name, "path": rel, "saved": True}
+                    elif action == "import_file":
+                        rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+                        source = str(payload.get("source", "")).strip()
+                        if not source:
+                            raise RuntimeError("Import source file is missing.")
+                        result = server.import_file(name, rel, source)
                     elif action == "create_folder":
                         rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
                         server.create_folder(name, rel)
@@ -643,6 +649,31 @@ class OwnerServerManager:
         self.status.set("Saving…")
         self.call("write_file",{"server":self.server_var.get(),"path":p,"content":content},
                   lambda r,e: self.status.set(e or "File saved."))
+
+    def import_file(self):
+        source = filedialog.askopenfilename(
+            parent=self.win,
+            title="Import file into server"
+        )
+        if not source:
+            return
+        filename = source.replace("\\", "/").rsplit("/", 1)[-1]
+        destination = (self.path + "/" + filename).strip("/") if self.path else filename
+        if not messagebox.askyesno(
+            "Import File",
+            "Import this file into:\\n/" + destination + "?",
+            parent=self.win
+        ):
+            return
+        self.status.set("Importing " + filename + "…")
+        self.call(
+            "import_file",
+            {"server": self.server_var.get(), "path": destination, "source": source},
+            lambda r, e: (
+                self.status.set(e or "Imported " + filename + "."),
+                self.refresh_files()
+            )
+        )
 
     def new_file(self):
         p=simpledialog.askstring("New File","Path relative to server root:",parent=self.win)
