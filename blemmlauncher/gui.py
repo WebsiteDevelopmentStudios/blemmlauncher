@@ -803,18 +803,6 @@ class App:
                 self.q.put(("remote_error", str(exc), None, None))
         threading.Thread(target=worker, daemon=True).start()
 
-    def _remote_agent_selected(self, _event=None):
-        index = self._remote_agent_combo.current()
-        if index < 0 or index >= len(self._remote_agents):
-            return
-        agent = self._remote_agents[index]
-        self._remote_agent_id = agent.get("id")
-        self._remote_status_label.config(
-            text=str(agent.get("status", "offline")).upper(),
-            foreground=SUCCESS if agent.get("status") == "online" else DANGER
-        )
-        self._remote_action("status")
-
     def _remote_selected_server(self):
         return "Survival"
 
@@ -3257,21 +3245,37 @@ class App:
 
                 elif kind == "remote_agents":
                     self._remote_agents = list(text or [])
-                    values = [
-                        str(a.get("name", "Unnamed")) + "  •  " + str(a.get("status", "offline"))
-                        for a in self._remote_agents
+
+                    # The Developer tab no longer exposes a server-PC selector.
+                    # Automatically use the first online paired agent.
+                    online = [
+                        a for a in self._remote_agents
+                        if str(a.get("status", "")).lower() == "online"
                     ]
-                    self._remote_agent_combo.configure(values=values)
-                    if self._remote_agents:
-                        if self._remote_agent_id not in [a.get("id") for a in self._remote_agents]:
-                            self._remote_agent_id = self._remote_agents[0].get("id")
-                        index = next((i for i, a in enumerate(self._remote_agents) if a.get("id") == self._remote_agent_id), 0)
-                        self._remote_agent_combo.current(index)
+                    candidates = online or self._remote_agents
+                    if candidates:
+                        if self._remote_agent_id not in [a.get("id") for a in candidates]:
+                            self._remote_agent_id = candidates[0].get("id")
+                        selected = next(
+                            (a for a in candidates if a.get("id") == self._remote_agent_id),
+                            candidates[0]
+                        )
+                        self._remote_agent_id = selected.get("id")
+                        self._remote_status_label.config(
+                            text=str(selected.get("status", "offline")).upper(),
+                            foreground=(
+                                SUCCESS
+                                if str(selected.get("status", "")).lower() == "online"
+                                else DANGER
+                            )
+                        )
                         self._remote_action("status")
                     else:
                         self._remote_agent_id = None
-                        self._remote_agent_combo.set("")
-                        self._remote_status_label.config(text="No paired server PCs.", foreground=MUTED)
+                        self._remote_status_label.config(
+                            text="No paired server PCs.",
+                            foreground=MUTED
+                        )
 
                 elif kind == "remote_result":
                     action, result_status, result = text
