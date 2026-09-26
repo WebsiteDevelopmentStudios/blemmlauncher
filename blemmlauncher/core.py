@@ -21,7 +21,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "1.3.0"
+LAUNCHER_NAME, LAUNCHER_VERSION = "BlemmLauncher", "2.1.1"
 
 # ============================================================
 # FORCE REMOVE DEMO MODE GLOBAL BYPASS
