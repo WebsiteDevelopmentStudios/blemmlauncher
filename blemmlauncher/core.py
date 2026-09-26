@@ -1564,7 +1564,11 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
     cmd = [
         java,
         "-Xms512M",
-        "-Xmx" + str(ram)
+        "-Xmx" + str(ram),
+        # LWJGL 3 reads this property directly when loading its native DLLs.
+        # Keep it explicit for imported/custom clients, especially older
+        # clients whose inherited version JSON may not set it correctly.
+        "-Dorg.lwjgl.librarypath=" + os.path.abspath(natives_dir)
     ]
 
     log_cfg = vj.get("logging", {}).get("client", {})
