@@ -209,6 +209,26 @@ class Agent:
             server.write_file(name, rel, content)
             return {"server": name, "path": rel, "saved": True}
 
+        if action == "import_file":
+            if not name:
+                raise RuntimeError("Choose a server.")
+            rel = str(payload.get("path", "")).replace("\\", "/").strip("/")
+            encoded = str(payload.get("data", ""))
+            import base64
+            try:
+                data = base64.b64decode(encoded, validate=True)
+            except Exception:
+                raise RuntimeError("Invalid imported file data.")
+            if len(data) > 50 * 1024 * 1024:
+                raise RuntimeError("Imported files are limited to 50 MB.")
+            destination = server.path(name, rel)
+            if os.path.isdir(destination):
+                raise RuntimeError("Import destination is a directory.")
+            os.makedirs(os.path.dirname(destination), exist_ok=True)
+            with open(destination, "wb") as f:
+                f.write(data)
+            return {"server": name, "path": rel, "size": len(data), "imported": True}
+
         if action == "create_folder":
             if not name:
                 raise RuntimeError("Choose a server.")
