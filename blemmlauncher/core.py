@@ -1771,12 +1771,33 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
                 "Could not inspect the LWJGL native directory: " + str(e)
             ) from e
 
-        result = subprocess.run(
+        # Do not use capture_output=True here. Minecraft can continuously
+        # write to stdout/stderr; a PIPE can fill and make the process appear
+        # frozen while BlemmLauncher waits for it to exit. Stream both pipes
+        # while the game is running instead.
+        log("Minecraft process started.")
+        process = subprocess.Popen(
             cmd,
             cwd=GAME_DIR,
-            capture_output=True,
-            env=launch_env
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=launch_env,
+            bufsize=1,
+            universal_newlines=True,
+            errors="replace"
         )
+
+        try:
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    log(line)
+        finally:
+            if process.stdout is not None:
+                process.stdout.close()
+
+        returncode = process.wait()
+        result = type("LaunchResult", (), {"returncode": returncode})()
 
     finally:
         if disabled:
