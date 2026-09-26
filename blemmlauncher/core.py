@@ -497,8 +497,7 @@ def manifest():
         except Exception as e:
             if attempt == 3:
                 raise RuntimeError(
-                    "can't reach Mojang (attempt 3): " + str(e) + "\n"
-                    "check internet / firewall / proxy, then retry"
+                    "can't reach Mojang (attempt 3): " + str(e) + "\n"                    "check internet / firewall / proxy, then retry"
                 ) from e
 
             log("manifest fetch failed (" + str(e) + ") - retrying...")
@@ -997,7 +996,6 @@ def install_optifine(installer_jar, version_id=None):
 
         if r.returncode == 0 and jars:
             jars.sort(key=lambda f: os.path.getsize(os.path.join(work, f)))
-
             source = os.path.join(work, jars[-1])
 
             shutil.copy2(source, out)
@@ -1497,8 +1495,7 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
 
     elif optifine_jars:
         if len(optifine_jars) > 1:
-            log(
-                "WARNING: multiple OptiFine JARs found in mods/ - this "
+            log(                "WARNING: multiple OptiFine JARs found in mods/ - this "
                 "can crash the game. Remove all but one."
             )
 
@@ -1561,14 +1558,17 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
                 "optifine.OptiFineTweaker"
             ]
 
+    # LWJGL needs both the explicit native-library properties and a
+    # Windows DLL search path. Some older LWJGL builds load a native DLL
+    # whose own dependencies are resolved through PATH rather than only
+    # org.lwjgl.librarypath.
+    native_path = os.path.abspath(natives_dir)
     cmd = [
         java,
         "-Xms512M",
         "-Xmx" + str(ram),
-        # LWJGL 3 reads this property directly when loading its native DLLs.
-        # Keep it explicit for imported/custom clients, especially older
-        # clients whose inherited version JSON may not set it correctly.
-        "-Dorg.lwjgl.librarypath=" + os.path.abspath(natives_dir)
+        "-Dorg.lwjgl.librarypath=" + native_path,
+        "-Djava.library.path=" + native_path
     ]
 
     log_cfg = vj.get("logging", {}).get("client", {})
@@ -1611,10 +1611,43 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
     disabled = [] if optifine else _temp_disable_optifine()
 
     try:
+        launch_env = os.environ.copy()
+
+        # Make native DLLs discoverable to Windows as well as LWJGL.
+        if os_name() == "windows":
+            old_path = launch_env.get("PATH", "")
+            launch_env["PATH"] = (
+                native_path + os.pathsep + old_path
+                if old_path else native_path
+            )
+
+        # Log the actual native directory contents. If a client ships an
+        # incompatible/missing native, the crash report can now identify
+        # exactly what BlemmLauncher prepared before Java starts.
+        try:
+            native_files = sorted(
+                f for f in os.listdir(native_path)
+                if os.path.isfile(os.path.join(native_path, f))
+            )
+            log(
+                "LWJGL native directory: " + native_path
+                + " (" + str(len(native_files)) + " file(s))"
+            )
+            if not native_files:
+                raise RuntimeError(
+                    "No native files were extracted for this client. "
+                    "LWJGL cannot start without its native libraries."
+                )
+        except OSError as e:
+            raise RuntimeError(
+                "Could not inspect the LWJGL native directory: " + str(e)
+            ) from e
+
         result = subprocess.run(
             cmd,
             cwd=GAME_DIR,
-            capture_output=True
+            capture_output=True,
+            env=launch_env
         )
 
     finally:
