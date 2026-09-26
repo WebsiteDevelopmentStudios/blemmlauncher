@@ -1370,6 +1370,30 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
 
     classpath, natives_dir = install_libraries(vj)
 
+    # Custom imported clients can declare their own Maven dependencies.
+    # Scan the client again at launch so a copied/updated client is handled
+    # automatically, then put the prepared dependency JARs on the classpath.
+    if vj.get("_client_jar"):
+        try:
+            from . import instances as _instances
+            dep_result = _instances.scan_custom_client_dependencies(
+                vj["_client_jar"], os.path.basename(GAME_DIR)
+            )
+            for _, dep_path in dep_result.get("downloaded", []):
+                if str(dep_path).lower().endswith(".jar") and dep_path not in classpath:
+                    classpath.append(dep_path)
+        except Exception as e:
+            log("Custom client dependency scan failed: " + str(e))
+
+    custom_libraries = os.path.join(GAME_DIR, "libraries")
+    if os.path.isdir(custom_libraries):
+        for root, _, files in os.walk(custom_libraries):
+            for filename in files:
+                if filename.lower().endswith(".jar"):
+                    dep_path = os.path.abspath(os.path.join(root, filename))
+                    if dep_path not in classpath:
+                        classpath.append(dep_path)
+
     if os.path.exists(client_jar):
         classpath.insert(0, client_jar)
 
