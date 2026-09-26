@@ -1437,6 +1437,11 @@ def resolve_arglist(items, subs):
             if value == "-XstartOnFirstThread" and platform.system() != "Darwin":
                 continue
 
+            # Never launch Minecraft in demo mode. Some old/custom
+            # version JSON files include --demo in their game arguments.
+            if value == "--demo":
+                continue
+
             if value in quick_play_options:
                 continue
 
