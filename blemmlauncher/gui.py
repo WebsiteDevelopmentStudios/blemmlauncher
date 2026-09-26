@@ -637,6 +637,7 @@ class App:
         ttk.Entry(file_row, textvariable=self._remote_file).pack(side="left", fill="x", expand=True, padx=8)
         ttk.Button(file_row, text="Load", command=self._remote_read_file).pack(side="left")
         ttk.Button(file_row, text="Save", command=self._remote_write_file).pack(side="left", padx=(6, 0))
+        ttk.Button(file_row, text="Import", command=self._remote_import_file).pack(side="left", padx=(6, 0))
 
         self._developer_owner_frame = ttk.Frame(card, style="Card.TFrame")
         ttk.Label(self._developer_owner_frame, text="Owner controls", style="Accent.TLabel").pack(anchor="w")
@@ -928,6 +929,37 @@ class App:
         if not rel:
             return
         self._remote_action("read_file", {"server": "survival", "path": rel})
+
+    def _remote_import_file(self):
+        source = filedialog.askopenfilename(
+            parent=self.root,
+            title="Import file into Survival"
+        )
+        if not source:
+            return
+        filename = os.path.basename(source)
+        destination = self._remote_file.get().strip().replace("\\", "/").strip("/")
+        if not destination:
+            destination = filename
+            self._remote_file.set(destination)
+        else:
+            # If the current field points at a directory, place the imported
+            # file inside it; otherwise the selected path is replaced.
+            if destination.endswith("/"):
+                destination += filename
+        try:
+            size = os.path.getsize(source)
+            if size > 50 * 1024 * 1024:
+                raise RuntimeError("Imported files are limited to 50 MB.")
+            with open(source, "rb") as f:
+                import base64
+                encoded = base64.b64encode(f.read()).decode("ascii")
+            self._remote_action(
+                "import_file",
+                {"server": "Survival", "path": destination, "data": encoded}
+            )
+        except Exception as e:
+            messagebox.showerror("Import File", str(e), parent=self.root)
 
     def _remote_write_file(self):
         rel = self._remote_file.get().strip()
