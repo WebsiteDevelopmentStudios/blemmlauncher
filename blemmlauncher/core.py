@@ -804,6 +804,92 @@ def install_libraries(vj):
                         + " native file(s) from " + nrel
                     )
 
+    # Some modern/custom version JSONs contain LWJGL libraries but omit
+    # the native classifier metadata. If no native files were extracted,
+    # explicitly resolve the standard Windows LWJGL native artifacts.
+    try:
+        existing_native = [
+            f for f in os.listdir(natives_dir)
+            if os.path.isfile(os.path.join(natives_dir, f))
+        ]
+    except OSError:
+        existing_native = []
+
+    if os_name() == "windows" and not existing_native:
+        native_candidates = []
+        for lib in todo:
+            name = str(lib.get("name") or "")
+            if not name.startswith("org.lwjgl:"):
+                continue
+
+            parts = name.split(":")
+            if len(parts) < 3:
+                continue
+
+            group, artifact, version = parts[:3]
+            base_rel = maven_path(name)
+            root, ext = os.path.splitext(base_rel)
+            classifier = "natives-windows"
+            native_rel = root + "-" + classifier + ext
+
+            nart = lib.get("downloads", {}).get("classifiers", {}).get(classifier)
+            if nart:
+                native_candidates.append((native_rel, nart.get("url"), nart.get("sha1")))
+            else:
+                repo = lib.get("url")
+                native_url = (
+                    repo.rstrip("/") + "/" + native_rel
+                    if repo
+                    else LIB_BASE.rstrip("/") + "/" + native_rel
+                )
+                native_candidates.append((native_rel, native_url, None))
+
+        for nrel, nurl, nsha1 in native_candidates:
+            if not nurl:
+                continue
+            njar = os.path.normpath(os.path.join(LIBS, nrel))
+            try:
+                download(nurl, njar, nsha1)
+            except Exception:
+                fallback_url = None
+                if nurl.startswith(LIB_BASE):
+                    fallback_url = FORGE_MAVEN.rstrip("/") + "/" + nrel
+                elif nurl.startswith(FORGE_MAVEN):
+                    fallback_url = LIB_BASE.rstrip("/") + "/" + nrel
+                if fallback_url:
+                    try:
+                        download(fallback_url, njar, nsha1)
+                    except Exception:
+                        continue
+                else:
+                    continue
+
+            try:
+                with zipfile.ZipFile(njar) as z:
+                    extracted = 0
+                    for info in z.infolist():
+                        if info.is_dir():
+                            continue
+                        filename = os.path.basename(info.filename)
+                        if (
+                            not filename
+                            or info.filename.startswith("META-INF/")
+                            or filename.endswith((".sha1", ".sha", ".git"))
+                        ):
+                            continue
+                        with z.open(info) as src, open(
+                            os.path.join(natives_dir, filename), "wb"
+                        ) as dst:
+                            shutil.copyfileobj(src, dst)
+                        extracted += 1
+                    if extracted:
+                        log(
+                            "LWJGL fallback extracted "
+                            + str(extracted) + " native file(s) from " + nrel
+                        )
+            except (OSError, zipfile.BadZipFile) as e:
+                log("LWJGL native fallback failed for " + nrel + ": " + str(e))
+
     if not classpath:
         raise RuntimeError(
             "no libraries could be resolved for this version - "
