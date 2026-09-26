@@ -183,6 +183,219 @@ def create(name, version, loader=None, ram="4G", username="Blemm", build=None):
     return cfg
 
 
+
+# ============================================================
+# JAVA MULTIPLAYER SERVER LIST
+# ============================================================
+
+_NBT_END = 0
+_NBT_BYTE = 1
+_NBT_SHORT = 2
+_NBT_INT = 3
+_NBT_LONG = 4
+_NBT_FLOAT = 5
+_NBT_DOUBLE = 6
+_NBT_BYTE_ARRAY = 7
+_NBT_STRING = 8
+_NBT_LIST = 9
+_NBT_COMPOUND = 10
+_NBT_INT_ARRAY = 11
+_NBT_LONG_ARRAY = 12
+
+
+def _nbt_read_string(data, pos):
+    import struct
+    if pos + 2 > len(data):
+        raise ValueError("truncated NBT string")
+    size = struct.unpack_from(">H", data, pos)[0]
+    pos += 2
+    end = pos + size
+    if end > len(data):
+        raise ValueError("truncated NBT string data")
+    return data[pos:end].decode("utf-8"), end
+
+
+def _nbt_read_payload(data, pos, tag_type):
+    import struct
+    if tag_type == _NBT_BYTE:
+        return struct.unpack_from(">b", data, pos)[0], pos + 1
+    if tag_type == _NBT_SHORT:
+        return struct.unpack_from(">h", data, pos)[0], pos + 2
+    if tag_type == _NBT_INT:
+        return struct.unpack_from(">i", data, pos)[0], pos + 4
+    if tag_type == _NBT_LONG:
+        return struct.unpack_from(">q", data, pos)[0], pos + 8
+    if tag_type == _NBT_FLOAT:
+        return struct.unpack_from(">f", data, pos)[0], pos + 4
+    if tag_type == _NBT_DOUBLE:
+        return struct.unpack_from(">d", data, pos)[0], pos + 8
+    if tag_type == _NBT_STRING:
+        return _nbt_read_string(data, pos)
+    if tag_type == _NBT_BYTE_ARRAY:
+        n = struct.unpack_from(">i", data, pos)[0]
+        pos += 4
+        return list(data[pos:pos + n]), pos + n
+    if tag_type == _NBT_INT_ARRAY:
+        n = struct.unpack_from(">i", data, pos)[0]
+        pos += 4
+        values = []
+        for _ in range(n):
+            values.append(struct.unpack_from(">i", data, pos)[0])
+            pos += 4
+        return values, pos
+    if tag_type == _NBT_LONG_ARRAY:
+        n = struct.unpack_from(">i", data, pos)[0]
+        pos += 4
+        values = []
+        for _ in range(n):
+            values.append(struct.unpack_from(">q", data, pos)[0])
+            pos += 8
+        return values, pos
+    if tag_type == _NBT_LIST:
+        child_type = data[pos]
+        n = struct.unpack_from(">i", data, pos + 1)[0]
+        pos += 5
+        values = []
+        for _ in range(n):
+            value, pos = _nbt_read_payload(data, pos, child_type)
+            values.append(value)
+        return {"type": child_type, "items": values}, pos
+    if tag_type == _NBT_COMPOUND:
+        values = {}
+        while True:
+            child_type = data[pos]
+            pos += 1
+            if child_type == _NBT_END:
+                break
+            name, pos = _nbt_read_string(data, pos)
+            value, pos = _nbt_read_payload(data, pos, child_type)
+            values[name] = {"type": child_type, "value": value}
+        return values, pos
+    raise ValueError("unsupported NBT tag type: " + str(tag_type))
+
+
+def _nbt_read(data):
+    if not data or data[0] != _NBT_COMPOUND:
+        raise ValueError("servers.dat is not a compound NBT file")
+    _, pos = _nbt_read_string(data, 1)
+    return _nbt_read_payload(data, pos, _NBT_COMPOUND)[0]
+
+
+def _nbt_write_string(value):
+    import struct
+    raw = str(value).encode("utf-8")
+    if len(raw) > 65535:
+        raise ValueError("NBT string is too long")
+    return struct.pack(">H", len(raw)) + raw
+
+
+def _nbt_write_payload(tag_type, value):
+    import struct
+    if tag_type == _NBT_BYTE:
+        return struct.pack(">b", int(value))
+    if tag_type == _NBT_SHORT:
+        return struct.pack(">h", int(value))
+    if tag_type == _NBT_INT:
+        return struct.pack(">i", int(value))
+    if tag_type == _NBT_LONG:
+        return struct.pack(">q", int(value))
+    if tag_type == _NBT_FLOAT:
+        return struct.pack(">f", float(value))
+    if tag_type == _NBT_DOUBLE:
+        return struct.pack(">d", float(value))
+    if tag_type == _NBT_STRING:
+        return _nbt_write_string(value)
+    if tag_type == _NBT_BYTE_ARRAY:
+        return struct.pack(">i", len(value)) + bytes((int(x) & 255) for x in value)
+    if tag_type == _NBT_INT_ARRAY:
+        return struct.pack(">i", len(value)) + b"".join(struct.pack(">i", int(x)) for x in value)
+    if tag_type == _NBT_LONG_ARRAY:
+        return struct.pack(">i", len(value)) + b"".join(struct.pack(">q", int(x)) for x in value)
+    if tag_type == _NBT_LIST:
+        child_type = int(value["type"])
+        items = value.get("items", [])
+        return bytes([child_type]) + struct.pack(">i", len(items)) + b"".join(
+            _nbt_write_payload(child_type, item) for item in items
+        )
+    if tag_type == _NBT_COMPOUND:
+        out = bytearray()
+        for name, entry in value.items():
+            child_type = int(entry["type"])
+            out.append(child_type)
+            out.extend(_nbt_write_string(name))
+            out.extend(_nbt_write_payload(child_type, entry["value"]))
+        out.append(_NBT_END)
+        return bytes(out)
+    raise ValueError("unsupported NBT tag type: " + str(tag_type))
+
+
+def _nbt_write(root):
+    return bytes([_NBT_COMPOUND]) + _nbt_write_string("") + _nbt_write_payload(_NBT_COMPOUND, root)
+
+
+def _server_list_entry(name, address):
+    return {
+        "type": _NBT_COMPOUND,
+        "value": {
+            "name": {"type": _NBT_STRING, "value": str(name)},
+            "ip": {"type": _NBT_STRING, "value": str(address)},
+            "acceptTextures": {"type": _NBT_BYTE, "value": 0},
+        }
+    }
+
+
+def ensure_online_server(name="Survival", address="survival.blemm.devs.surf:25565"):
+    """Add/update the managed server in an instance's Minecraft Multiplayer list."""
+    d = instance_dir(name)
+    os.makedirs(d, exist_ok=True)
+    target = os.path.join(d, "servers.dat")
+    root = {}
+
+    if os.path.isfile(target):
+        try:
+            import gzip
+            with gzip.open(target, "rb") as f:
+                root = _nbt_read(f.read())
+        except Exception:
+            root = {}
+
+    existing = root.get("servers")
+    if not isinstance(existing, dict) or existing.get("type") != _NBT_LIST:
+        existing = {"type": _NBT_LIST, "items": []}
+
+    items = existing.setdefault("items", [])
+    entry = _server_list_entry("Survival", address)
+    replaced = False
+
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        value = item.get("value", {})
+        if not isinstance(value, dict):
+            continue
+        item_name = value.get("name", {}).get("value")
+        item_ip = value.get("ip", {}).get("value")
+        if item_name == "Survival" or item_ip == address:
+            items[i] = entry
+            replaced = True
+            break
+
+    if not replaced:
+        items.append(entry)
+
+    root["servers"] = {
+        "type": _NBT_LIST,
+        "value": {"type": _NBT_COMPOUND, "items": items},
+    }
+
+    import gzip
+    tmp = target + ".part"
+    with gzip.open(tmp, "wb") as f:
+        f.write(_nbt_write(root))
+    os.replace(tmp, target)
+    return target
+
+
 def delete(name):
     d = instance_dir(name)
     if os.path.isdir(d):
