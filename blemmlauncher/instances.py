@@ -363,7 +363,8 @@ def ensure_online_server(name="Survival", address="survival.blemm.devs.surf:2556
     if not isinstance(existing, dict) or existing.get("type") != _NBT_LIST:
         existing = {"type": _NBT_LIST, "items": []}
 
-    items = existing.setdefault("items", [])
+    list_value = existing.get("value") if isinstance(existing.get("value"), dict) else {"type": _NBT_COMPOUND, "items": []}
+    items = list_value.setdefault("items", [])
     entry = _server_list_entry("Survival", address)
     replaced = False
 
