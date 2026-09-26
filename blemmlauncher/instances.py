@@ -17,13 +17,59 @@ import urllib.request
 from . import database
 
 
-LAUNCHERS_ROOT = os.environ.get(
-    "BLEMM_DIR",
-    os.path.join(
+def _user_data_root():
+    """
+    Return the persistent launcher data directory.
+
+    Packaged Windows builds keep user data in %APPDATA% so updates and
+    reinstalls never replace Minecraft servers, instances, assets, or tools.
+    BLEMM_DIR remains an explicit override for advanced/custom setups.
+    """
+    override = os.environ.get("BLEMM_DIR")
+    if override:
+        return os.path.abspath(os.path.expandvars(os.path.expanduser(override)))
+
+    if os.name == "nt" and getattr(sys, "frozen", False):
+        roaming = os.environ.get("APPDATA") or os.path.join(
+            os.path.expanduser("~"), "AppData", "Roaming"
+        )
+        new_root = os.path.join(roaming, "BlemmLauncher", "minecraft")
+        old_root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "minecraft"
+        )
+
+        if os.path.abspath(old_root) != os.path.abspath(new_root) and os.path.isdir(old_root):
+            marker = os.path.join(new_root, ".legacy_migration_complete")
+            if not os.path.exists(marker):
+                os.makedirs(new_root, exist_ok=True)
+                for base, dirs, files in os.walk(old_root):
+                    rel = os.path.relpath(base, old_root)
+                    target = new_root if rel == "." else os.path.join(new_root, rel)
+                    os.makedirs(target, exist_ok=True)
+                    for filename in files:
+                        src = os.path.join(base, filename)
+                        dst = os.path.join(target, filename)
+                        if not os.path.exists(dst):
+                            try:
+                                shutil.copy2(src, dst)
+                            except OSError:
+                                pass
+                try:
+                    with open(marker, "w", encoding="utf-8") as f:
+                        f.write("BlemmLauncher legacy data migration completed.\\n")
+                except OSError:
+                    pass
+
+        return new_root
+
+    return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "minecraft"
     )
-)
+
+
+LAUNCHERS_ROOT = _user_data_root()
 
 INSTANCES_DIR = os.path.join(LAUNCHERS_ROOT, "instances")
 SHARED_ASSETS = os.path.join(LAUNCHERS_ROOT, "assets")
