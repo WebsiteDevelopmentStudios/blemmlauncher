@@ -289,6 +289,21 @@ def write_file(name, rel, content):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f: f.write(content)
 
+def import_file(name, rel, source):
+    """Copy a local file into the server, preserving binary files."""
+    source = os.path.abspath(os.path.expanduser(str(source)))
+    if not os.path.isfile(source):
+        raise RuntimeError("Import source file not found.")
+    size = os.path.getsize(source)
+    if size > 50 * 1024 * 1024:
+        raise RuntimeError("Imported files are limited to 50 MB.")
+    destination = path(name, rel)
+    if os.path.isdir(destination):
+        raise RuntimeError("Import destination is a directory.")
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    shutil.copy2(source, destination)
+    return {"server": name, "path": rel, "size": size, "imported": True}
+
 def create_folder(name, rel): os.makedirs(path(name, rel), exist_ok=True)
 def create_file(name, rel, content=""): write_file(name, rel, content)
 def remove(name, rel):
