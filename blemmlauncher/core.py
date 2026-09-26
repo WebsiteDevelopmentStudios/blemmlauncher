@@ -1353,7 +1353,14 @@ def launch(version_id, username="Blemm", ram="2G", optifine=False):
     even if the game crashes.
     """
 
-    # Make the managed server appear in Minecraft Multiplayer for every launch.\n    try:\n        from . import instances as _instances\n        _instances.ensure_online_server()\n    except Exception as e:\n        log("Could not update the Minecraft Multiplayer server list: " + str(e))\n\n    m = manifest()
+    # Make the managed server appear in Minecraft Multiplayer for every launch.
+    try:
+        from . import instances as _instances
+        _instances.ensure_online_server()
+    except Exception as e:
+        log("Could not update the Minecraft Multiplayer server list: " + str(e))
+
+    m = manifest()
 
     vid = resolve_version(version_id, m)
 
