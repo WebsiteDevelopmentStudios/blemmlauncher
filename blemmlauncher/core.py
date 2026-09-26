@@ -739,14 +739,50 @@ def install_libraries(vj):
         classifier = lib.get("natives", {}).get(os_name())
 
         if classifier:
+            # Older Minecraft JSON can specify a native classifier without
+            # providing downloads.classifiers. Build the native Maven path
+            # from the library coordinate in that case.
             nart = dl.get("classifiers", {}).get(classifier)
 
             if nart:
-                njar = os.path.normpath(os.path.join(LIBS, nart["path"]))
+                nrel = nart["path"]
+                nurl = nart["url"]
+                nsha1 = nart.get("sha1")
+            elif lib.get("name"):
+                base_rel = maven_path(lib["name"])
+                root, ext = os.path.splitext(base_rel)
+                nrel = root + "-" + classifier + ext
+                repo = lib.get("url")
+                nurl = (
+                    repo.rstrip("/") + "/" + nrel
+                    if repo
+                    else LIB_BASE.rstrip("/") + "/" + nrel
+                )
+                nsha1 = None
+                log("Using native Maven fallback: " + nrel)
+            else:
+                nrel = None
 
-                download(nart["url"], njar, nart.get("sha1"))
+            if nrel:
+                njar = os.path.normpath(os.path.join(LIBS, nrel))
+
+                try:
+                    download(nurl, njar, nsha1)
+                except Exception:
+                    if nurl.startswith(LIB_BASE):
+                        fallback_url = FORGE_MAVEN.rstrip("/") + "/" + nrel
+                    elif nurl.startswith(FORGE_MAVEN):
+                        fallback_url = LIB_BASE.rstrip("/") + "/" + nrel
+                    else:
+                        fallback_url = None
+
+                    if not fallback_url:
+                        raise
+
+                    download(fallback_url, njar, nsha1)
 
                 with zipfile.ZipFile(njar) as z:
+                    extracted = 0
                     for info in z.infolist():
                         n = os.path.basename(info.filename)
 
@@ -761,6 +797,12 @@ def install_libraries(vj):
                                 os.path.join(natives_dir, n), "wb"
                             ) as o:
                                 shutil.copyfileobj(s, o)
+                            extracted += 1
+
+                    log(
+                        "Extracted " + str(extracted)
+                        + " native file(s) from " + nrel
+                    )
 
     if not classpath:
         raise RuntimeError(
