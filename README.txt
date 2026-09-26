@@ -18,7 +18,6 @@ FEATURES
 - Minecraft server creation and management with automatic Java and server software downloads.
 - Server console with live output and command input.
 - Server file browser, editor, and file import tools.
-- Owner developer tools for remotely managing the Survival server.
 - Windows EXE builds through GitHub Actions.
 
 INSTALLATION
@@ -92,10 +91,6 @@ The Server Management window lets you:
 - create, rename, and delete files and folders;
 - import files from Windows File Explorer;
 - delete a server and all of its files.
-
-The developer-reserved server name "Survival" can be used by the developer
-and owner server-management tools. Normal server creation does not use
-reserved developer names.
 
 MODRINTH
 --------
