@@ -17,7 +17,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
 
 from PIL import Image, ImageTk
 
-from . import core, instances, server
+from . import core, instances, server, updater
 from .server_manager import OwnerServerManager
 from Dev import auth as dev_auth
 
@@ -178,6 +178,10 @@ class App:
         self._build_status()
 
         core.set_reporter(self._on_report)
+        threading.Thread(
+            target=self._check_for_updates,
+            daemon=True
+        ).start()
         root.after(100, self._drain)
 
         self._refresh_list()
@@ -2964,6 +2968,14 @@ class App:
         except Exception:
             return
 
+    def _check_for_updates(self):
+        try:
+            update = updater.check_latest()
+            if update:
+                self.q.put(("update_available", update, None, None))
+        except Exception:
+            pass
+
     def _drain(self):
         dialogs = []
         while True:
@@ -2978,7 +2990,28 @@ class App:
                 done = item[2] if len(item) > 2 else None
                 total = item[3] if len(item) > 3 else None
 
-                if kind == "owner_agent_ready":
+                if kind == "update_available":
+                    update = text or {}
+                    version = str(update.get("version", ""))
+                    if messagebox.askyesno(
+                        "BlemmLauncher Update",
+                        "New update! Install now?\\n\\nVersion " + version
+                    ):
+                        try:
+                            self.status.config(
+                                text="Downloading update…",
+                                foreground=FG
+                            )
+                            updater.install(update)
+                            self.root.destroy()
+                            return
+                        except Exception as e:
+                            messagebox.showerror(
+                                "BlemmLauncher Update",
+                                "Update failed:\\n" + str(e)
+                            )
+
+                elif kind == "owner_agent_ready":
                     self._remote_agent_id = text.get("agent_id")
                     self._owner_agent_started = True
                     self.status.config(
