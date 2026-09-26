@@ -549,7 +549,10 @@ def import_client(path, instance_name=None, mc_version=None,
     d = instance_dir(name)
     vdest = os.path.join(d, "versions", vid)
     os.makedirs(vdest, exist_ok=True)
-    shutil.copy2(src, os.path.join(vdest, vid + ".jar"))
+    client_dest = os.path.join(vdest, vid + ".jar")
+    shutil.copy2(src, client_dest)
+
+    dependency_result = scan_custom_client_dependencies(client_dest, name)
 
     vjson = {
         "id": vid,
@@ -563,7 +566,166 @@ def import_client(path, instance_name=None, mc_version=None,
     cfg["version"] = vid
     cfg["loader"] = None
     save_cfg(name, cfg)
-    return name, "custom client '" + vid + "' imported (based on Minecraft " + mv + ")"
+    extra = " and " + str(len(dependency_result["downloaded"])) + " dependencies prepared" if dependency_result["downloaded"] else ""
+    return name, "custom client '" + vid + "' imported (based on Minecraft " + mv + ")" + extra
+
+
+
+def scan_custom_client_dependencies(jar_path, instance_name):
+    """Scan a custom client JAR for declared dependency coordinates and download them.
+
+    Supported declarations:
+    - META-INF/blemm-dependencies.json
+    - META-INF/dependencies.json
+    - dependencies.json
+    - META-INF/MANIFEST.MF Class-Path entries that point to dependency JARs
+
+    JSON may contain:
+      {"libraries": ["group:artifact:version"]}
+    or:
+      {"dependencies": [{"name": "group:artifact:version", "url": "..."}]}
+    """
+    from . import core
+
+    jar_path = os.path.abspath(jar_path)
+    if not os.path.isfile(jar_path):
+        raise RuntimeError("custom client JAR not found: " + jar_path)
+
+    instance_root = instance_dir(instance_name)
+    libraries_dir = os.path.join(instance_root, "libraries")
+    os.makedirs(libraries_dir, exist_ok=True)
+
+    declarations = []
+    manifest_classpath = []
+
+    with zipfile.ZipFile(jar_path, "r") as z:
+        names = set(z.namelist())
+
+        for candidate in (
+            "META-INF/blemm-dependencies.json",
+            "META-INF/dependencies.json",
+            "dependencies.json",
+        ):
+            if candidate not in names:
+                continue
+            try:
+                data = json.loads(z.read(candidate).decode("utf-8"))
+            except Exception as e:
+                raise RuntimeError(
+                    "Invalid dependency manifest in custom client: " + candidate
+                ) from e
+
+            values = data.get("libraries", data.get("dependencies", [])) if isinstance(data, dict) else data
+            if not isinstance(values, list):
+                continue
+
+            for value in values:
+                if isinstance(value, str):
+                    declarations.append({"name": value})
+                elif isinstance(value, dict):
+                    name = value.get("name") or value.get("coordinate") or value.get("maven")
+                    if name:
+                        declarations.append({
+                            "name": str(name),
+                            "url": value.get("url"),
+                        })
+
+        if "META-INF/MANIFEST.MF" in names:
+            try:
+                manifest = z.read("META-INF/MANIFEST.MF").decode("utf-8", errors="replace")
+                manifest = manifest.replace("\r\n ", "").replace("\n ", "")
+                for line in manifest.splitlines():
+                    if line.lower().startswith("class-path:"):
+                        manifest_classpath.extend(line.split(":", 1)[1].strip().split())
+                    elif line.lower().startswith("class-path "):
+                        manifest_classpath.extend(line.split(":", 1)[1].strip().split())
+            except Exception:
+                pass
+
+    downloaded = []
+    unresolved = []
+
+    def coordinate_path(coordinate):
+        parts = str(coordinate).split(":")
+        if len(parts) < 3:
+            raise ValueError("expected group:artifact:version")
+        group, artifact, version = parts[:3]
+        classifier = parts[3] if len(parts) > 3 and parts[3] else None
+        ext = "jar"
+        if classifier and classifier.startswith("http"):
+            classifier = None
+        filename = artifact + "-" + version
+        if classifier:
+            filename += "-" + classifier
+        filename += "." + ext
+        rel = os.path.join(*group.split("."), artifact, version, filename)
+        return group, artifact, version, rel
+
+    for item in declarations:
+        coordinate = item["name"].strip()
+        try:
+            _, _, _, rel = coordinate_path(coordinate)
+        except ValueError:
+            unresolved.append(coordinate)
+            continue
+
+        dest = os.path.join(libraries_dir, rel)
+        url = item.get("url")
+        if not url:
+            url = "https://repo1.maven.org/maven2/" + rel.replace(os.sep, "/")
+
+        try:
+            _download(url, dest)
+            downloaded.append((coordinate, dest))
+        except Exception as e:
+            unresolved.append(coordinate + " (" + str(e) + ")")
+
+    # Manifest Class-Path entries are often filenames beside the client JAR.
+    # Copy any dependency JARs that were bundled next to the imported client
+    # into the instance's libraries directory rather than silently losing them.
+    if manifest_classpath:
+        source_dir = os.path.dirname(jar_path)
+        for relname in manifest_classpath:
+            relname = os.path.basename(relname)
+            source = os.path.join(source_dir, relname)
+            if os.path.isfile(source) and relname.lower().endswith(".jar"):
+                dest = os.path.join(libraries_dir, relname)
+                if os.path.abspath(source) != os.path.abspath(dest):
+                    shutil.copy2(source, dest)
+                downloaded.append(("bundled:" + relname, dest))
+
+    # Also load any dependency JARs already bundled inside the client.
+    # They are extracted only when they live under a conventional
+    # dependencies/libraries folder, avoiding accidental extraction of
+    # ordinary client resources.
+    with zipfile.ZipFile(jar_path, "r") as z:
+        for name in z.namelist():
+            normalized = name.replace("\\", "/")
+            if not normalized.lower().endswith(".jar"):
+                continue
+            if not (normalized.startswith("libraries/") or normalized.startswith("dependencies/")):
+                continue
+            out = os.path.join(libraries_dir, os.path.basename(normalized))
+            with z.open(name) as src, open(out, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            downloaded.append(("embedded:" + os.path.basename(normalized), out))
+
+    if downloaded:
+        core.log(
+            "Custom client dependency scan: installed "
+            + str(len(downloaded)) + " dependency file(s)."
+        )
+
+    if unresolved:
+        core.log(
+            "Custom client dependency scan: unresolved declarations: "
+            + ", ".join(unresolved[:20])
+        )
+
+    return {
+        "downloaded": downloaded,
+        "unresolved": unresolved,
+    }
 
 
 def _java(mc_version):
