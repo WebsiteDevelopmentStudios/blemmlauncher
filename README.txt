@@ -153,3 +153,12 @@ diagnose.
 The launcher checks the GitHub releases page for newer BlemmLauncher releases.
 When a newer release with an installer is available, the launcher can prompt
 the user to install the update.
+
+
+CUSTOM SERVER IPS
+------------------
+Custom server IP/domain features are currently limited to developer use.
+If a custom IP does not work for a normal user, this is expected for now.
+The custom-IP system is still being developed and the required developer-only
+server/network configuration is not publicly available yet. Regular users can
+still use the server entries provided by BlemmLauncher when they are available.
